@@ -373,9 +373,37 @@ with tab_signals:
 # TAB 4: STRATEGY BACKTESTER
 with tab_backtest:
     st.subheader("Test Strategies on Past Data")
-    st.write("Click below to run a historical test of your strategies without leaving this window.")
-    if st.button("▶️ Run Historical Backtest Now"):
-        with st.spinner("Analyzing historical market data..."):
+    st.write(
+        "Use the slider below to choose how far back into the past you want to simulate. "
+        "The bot will analyze every candle across all pairs and report profit, win rate, and maximum drawdown."
+    )
+
+    col_slider, col_btn = st.columns([2, 1])
+
+    with col_slider:
+        lookback_bars = st.slider(
+            "Historical Depth (4-Hour Candles)",
+            min_value=500,
+            max_value=10000,
+            value=1500,
+            step=500,
+            help="1,500 bars ≈ 1 year of trading. 10,000 bars ≈ 6.5 years."
+        )
+        approx_months = round(lookback_bars / 125, 1)
+        st.caption(f"⏱️ **Estimated Test Period:** ~{approx_months} months (~{round(approx_months/12, 1)} years of market history)")
+
+    with col_btn:
+        st.write("")
+        st.write("")
+        run_btn = st.button("▶️ Run Backtest Now", type="primary", use_container_width=True)
+
+    if run_btn:
+        with st.spinner(f"Simulating past ~{approx_months} months across all 10 forex pairs..."):
             root_dir = Path(__file__).resolve().parent.parent
-            result = subprocess.run([sys.executable, str(root_dir / "run_test.py")], capture_output=True, text=True, cwd=str(root_dir))
+            result = subprocess.run(
+                [sys.executable, str(root_dir / "run_test.py"), str(lookback_bars)],
+                capture_output=True,
+                text=True,
+                cwd=str(root_dir)
+            )
             st.code(result.stdout)

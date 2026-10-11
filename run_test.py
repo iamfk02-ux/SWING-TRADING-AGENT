@@ -26,6 +26,16 @@ def main():
     with open(config_path, "r") as f:
         config = yaml.safe_load(f)
 
+    # Allow custom bar count override from CLI / Dashboard slider
+    if len(sys.argv) > 1:
+        try:
+            custom_h4 = int(sys.argv[1])
+            config.setdefault("data", {})["h4_bars"] = custom_h4
+            config["data"]["d1_bars"] = max(200, custom_h4 // 5)
+            print(f"[*] Custom Lookback Applied: {custom_h4} H4 bars (~{round(custom_h4 / 1500, 1)} years)")
+        except ValueError:
+            pass
+
     init_db()
 
     data_agent = DataAgent(config)
