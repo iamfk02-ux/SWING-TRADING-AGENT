@@ -1,0 +1,176 @@
+"""
+Trend Agent:
+Implements exact strategy specification rules for swing trend-following:
+- D1 Regime: Trending Up or Trending Down
+- Pullback (H4): within last 5 candles, price touches H4 EMA20, without closing below EMA50 > 0.5 ATR
+- Trigger (H4): bullish/bearish resumption candle closing above/below previous high/low and EMA20
+- Sizing & Stops: Swing low/high - 0.5 ATR(H4), trailing stop at 2.5 ATR(D1), breakeven at +1.5R
+"""
+
+from typing import Dict, Any, Optional, List
+import pandas as pd
+import numpy as np
+
+from core.indicators import compute_ema, compute_atr, compute_adx
+from agents.regime_agent import Regime
+
+
+class TrendAgent:
+    def __init__(self, config: Dict[str, Any]):
+        self.config = config
+        trend_cfg = config.get("strategies", {}).get("trend", {})
+        self.ema_fast_len = trend_cfg.get("ema_fast", 20)
+        self.ema_slow_len = trend_cfg.get("ema_slow", 50)
+        self.atr_period = trend_cfg.get("atr_period", 14)
+        self.pullback_lookback = trend_cfg.get("pullback_lookback", 5)
+        self.max_close_beyond_slow_atr = trend_cfg.get("max_close_below_slow_atr", 0.5)
+        self.stop_buffer_atr = trend_cfg.get("stop_buffer_atr", 0.5)
+        self.min_stop_atr = trend_cfg.get("min_stop_atr", 1.0)
+        self.max_stop_atr = trend_cfg.get("max_stop_atr", 3.0)
+        self.strong_adx = trend_cfg.get("strong_adx", 30)
+
+    def scan_for_signal(
+        self,
+        symbol: str,
+        df_d1: pd.DataFrame,
+        df_h4: pd.DataFrame,
+        current_regime: str
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Scans the latest bar of df_h4 against D1 regime.
+        Returns signal dict if valid setup & trigger occur, otherwise None.
+        """
+        if current_regime not in [Regime.TRENDING_UP.value, Regime.TRENDING_DOWN.value]:
+            return None
+
+        if len(df_h4) < max(self.ema_slow_len, self.atr_period) + 10:
+            return None
+
+        # Calculate H4 indicators
+        h4_ema_fast = compute_ema(df_h4["close"], self.ema_fast_len)
+        h4_ema_slow = compute_ema(df_h4["close"], self.ema_slow_len)
+        h4_atr = compute_atr(df_h4, self.atr_period)
+        d1_adx = compute_adx(df_d1, 14)["adx"].iloc[-1]
+
+        curr_idx = len(df_h4) - 1
+        curr_bar = df_h4.iloc[curr_idx]
+        prev_bar = df_h4.iloc[curr_idx - 1]
+        atr_val = h4_atr.iloc[curr_idx]
+
+        if atr_val <= 0 or np.isnan(atr_val):
+            return None
+
+        # Lookback window for pullback
+        window_start = max(0, curr_idx - self.pullback_lookback)
+        pullback_window = df_h4.iloc[window_start:curr_idx]
+
+        # -----------------------------
+        # LONG SETUP (Trending Up)
+        # -----------------------------
+        if current_regime == Regime.TRENDING_UP.value:
+            # 1. Pullback condition: low touched EMA20 in window
+            touched_ema20 = (pullback_window["low"] <= h4_ema_fast.iloc[window_start:curr_idx]).any()
+            if not touched_ema20:
+                return None
+
+            # Must not close below EMA50 by more than 0.5 ATR
+            violated_slow = (
+                pullback_window["close"] < (h4_ema_slow.iloc[window_start:curr_idx] - (self.max_close_beyond_slow_atr * atr_val))
+            ).any()
+            if violated_slow:
+                return None
+
+            # 2. Trigger: current candle closes > prev high AND > EMA20
+            is_bullish_close = curr_bar["close"] > prev_bar["high"] and curr_bar["close"] > h4_ema_fast.iloc[curr_idx]
+            if not is_bullish_close:
+                return None
+
+            # 3. Stop loss: lowest low in pullback - 0.5 ATR
+            swing_low = min(pullback_window["low"].min(), curr_bar["low"])
+            sl = swing_low - (self.stop_buffer_atr * atr_val)
+            stop_dist = curr_bar["close"] - sl
+
+            if not (self.min_stop_atr * atr_val <= stop_dist <= self.max_stop_atr * atr_val):
+                return None
+
+            # Calculate confidence score (0.6 base, +0.1 for each strength factor)
+            confidence = 0.6
+            if d1_adx >= self.strong_adx:
+                confidence += 0.1
+            if h4_ema_fast.iloc[curr_idx] > h4_ema_slow.iloc[curr_idx]:
+                confidence += 0.1
+            if not (pullback_window["close"] < h4_ema_slow.iloc[window_start:curr_idx]).any():
+                confidence += 0.1
+            # Closed in top 25% of candle range
+            candle_range = curr_bar["high"] - curr_bar["low"]
+            if candle_range > 0 and (curr_bar["close"] - curr_bar["low"]) / candle_range >= 0.75:
+                confidence += 0.1
+
+            return {
+                "symbol": symbol,
+                "strategy": "TREND",
+                "direction": "BUY",
+                "entry": float(curr_bar["close"]),
+                "stop_loss": float(sl),
+                "take_profit": None,  # Runner / Trailing
+                "confidence": min(1.0, confidence),
+                "regime": current_regime,
+                "reason": "D1 uptrend with H4 EMA20 pullback and bullish continuation close",
+                "timestamp": str(curr_bar["timestamp"])
+            }
+
+        # -----------------------------
+        # SHORT SETUP (Trending Down)
+        # -----------------------------
+        if current_regime == Regime.TRENDING_DOWN.value:
+            # 1. Pullback condition: high touched EMA20 in window
+            touched_ema20 = (pullback_window["high"] >= h4_ema_fast.iloc[window_start:curr_idx]).any()
+            if not touched_ema20:
+                return None
+
+            # Must not close above EMA50 by more than 0.5 ATR
+            violated_slow = (
+                pullback_window["close"] > (h4_ema_slow.iloc[window_start:curr_idx] + (self.max_close_beyond_slow_atr * atr_val))
+            ).any()
+            if violated_slow:
+                return None
+
+            # 2. Trigger: current candle closes < prev low AND < EMA20
+            is_bearish_close = curr_bar["close"] < prev_bar["low"] and curr_bar["close"] < h4_ema_fast.iloc[curr_idx]
+            if not is_bearish_close:
+                return None
+
+            # 3. Stop loss: highest high in pullback + 0.5 ATR
+            swing_high = max(pullback_window["high"].max(), curr_bar["high"])
+            sl = swing_high + (self.stop_buffer_atr * atr_val)
+            stop_dist = sl - curr_bar["close"]
+
+            if not (self.min_stop_atr * atr_val <= stop_dist <= self.max_stop_atr * atr_val):
+                return None
+
+            # Confidence score
+            confidence = 0.6
+            if d1_adx >= self.strong_adx:
+                confidence += 0.1
+            if h4_ema_fast.iloc[curr_idx] < h4_ema_slow.iloc[curr_idx]:
+                confidence += 0.1
+            if not (pullback_window["close"] > h4_ema_slow.iloc[window_start:curr_idx]).any():
+                confidence += 0.1
+            candle_range = curr_bar["high"] - curr_bar["low"]
+            if candle_range > 0 and (curr_bar["high"] - curr_bar["close"]) / candle_range >= 0.75:
+                confidence += 0.1
+
+            return {
+                "symbol": symbol,
+                "strategy": "TREND",
+                "direction": "SELL",
+                "entry": float(curr_bar["close"]),
+                "stop_loss": float(sl),
+                "take_profit": None,
+                "confidence": min(1.0, confidence),
+                "regime": current_regime,
+                "reason": "D1 downtrend with H4 EMA20 pullback and bearish continuation close",
+                "timestamp": str(curr_bar["timestamp"])
+            }
+
+        return None

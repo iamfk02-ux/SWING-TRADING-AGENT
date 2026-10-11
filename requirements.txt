@@ -1,0 +1,7 @@
+# Python libraries the bot needs. INSTALL.bat installs these automatically.
+MetaTrader5>=5.0.45
+numpy>=1.26,<2.0
+pandas>=2.1,<3.0
+PyYAML>=6.0
+matplotlib>=3.8
+pytest>=8.0

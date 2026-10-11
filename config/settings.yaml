@@ -1,0 +1,162 @@
+# =====================================================================
+#  SWING TRADING BOT - SETTINGS
+#  You can edit this file with Notepad. Lines starting with # are notes.
+#  After changing anything, just restart the bot.
+# =====================================================================
+
+# ---------------------------------------------------------------------
+# ACCOUNT
+# ---------------------------------------------------------------------
+account:
+  # "cent" (recommended under $1,000) or "standard"
+  type: cent
+  # Starting balance used for backtests (in US dollars)
+  backtest_starting_balance: 300
+  # Commission per 1 standard lot, round trip, in USD (0 for most cent/standard accounts)
+  commission_per_lot: 0.0
+
+# ---------------------------------------------------------------------
+# TELEGRAM ALERTS (Optional - phone notifications)
+# ---------------------------------------------------------------------
+telegram:
+  enabled: true          # set to true once you fill in bot_token and chat_id
+  bot_token: "8803300097:AAHu8Qb04k1bdEETXoAdLaP97q0mBW804WM"           # get from @BotFather on Telegram (free)
+  chat_id: "1968991910"             # your telegram chat id from @userinfobot (free)
+
+# ---------------------------------------------------------------------
+# MT5 CONNECTION
+# Leave login/password/server empty if MT5 is already open and logged in.
+# ---------------------------------------------------------------------
+mt5:
+  terminal_path: ""      # e.g. "C:/Program Files/MetaTrader 5/terminal64.exe" (optional)
+  login: ""
+  password: ""
+  server: ""
+  # Some brokers add a suffix to symbol names (e.g. EURUSDm or EURUSD.c).
+  # Leave empty to auto-detect.
+  symbol_suffix: ""
+
+# ---------------------------------------------------------------------
+# DATA
+# ---------------------------------------------------------------------
+data:
+  source: mt5
+  h4_bars: 1000      # ~6 months of 4-hour candles for live scanning
+  d1_bars: 400       # ~1.5 years of daily candles for live scanning
+
+# ---------------------------------------------------------------------
+# SYMBOLS
+# ---------------------------------------------------------------------
+symbols:
+  forex:
+    - EURUSD
+    - GBPUSD
+    - USDJPY
+    - AUDUSD
+    - USDCAD
+    - NZDUSD
+    - USDCHF
+    - EURGBP
+    - AUDNZD
+    - EURJPY
+  # These "auto-unlock": watched always, traded only when the account is big
+  # enough that the broker's minimum lot fits inside the risk limit.
+  metals:
+    - XAUUSD
+  crypto:
+    - BTCUSD
+    - ETHUSD
+
+# ---------------------------------------------------------------------
+# RISK MANAGER  (hard rules - the optimizer can never change these)
+# ---------------------------------------------------------------------
+risk:
+  risk_per_trade_pct: 1.0          # % of equity risked per trade
+  max_risk_per_trade_pct: 2.0      # hard cap, cannot be exceeded
+  max_open_positions: 3
+  max_total_open_risk_pct: 3.0
+  max_currency_exposure_pct: 2.0   # net risk on any single currency
+  max_crypto_risk_pct: 1.0         # BTC + ETH combined
+  daily_loss_limit_pct: 3.0
+  weekly_loss_limit_pct: 5.0
+  drawdown_throttle_pct: 10.0      # from peak -> risk is halved
+  kill_switch_drawdown_pct: 20.0   # from peak -> all trading stops
+  high_volatility_risk_factor: 0.5
+  max_spread_to_stop_ratio: 0.10   # spread must be <= 10% of stop distance
+  max_spread_vs_normal: 2.0        # spread must be <= 2x its normal level
+  max_entry_slippage_atr: 0.3      # skip if price ran away > 0.3 x ATR(H4)
+  # No new forex entries on Friday after this hour (broker server time).
+  # Server time is usually UK time + 2 hours, so 18 = 16:00 UK.
+  friday_cutoff_server_hour: 18
+
+# ---------------------------------------------------------------------
+# MARKET-REGIME AGENT (daily candles)
+# ---------------------------------------------------------------------
+regime:
+  adx_period: 14
+  adx_trend_threshold: 25
+  adx_range_threshold: 20
+  ema_fast: 50
+  ema_slow: 200
+  ema_slope_lookback: 10
+  atr_period: 14
+  high_vol_percentile: 0.90       # ATR in top 10% of last 252 days
+  high_vol_lookback: 252
+  bb_period: 20
+  bb_std: 2.0
+  compression_percentile: 0.20    # BB width in lowest 20% of last 126 days
+  compression_lookback: 126
+  range_ema_drift_lookback: 20
+  range_ema_drift_atr: 1.0
+  confirm_bars: 2                 # new regime must hold 2 daily closes
+
+# ---------------------------------------------------------------------
+# STRATEGIES
+# ---------------------------------------------------------------------
+strategies:
+  trend:
+    enabled: true
+    ema_fast: 20
+    ema_slow: 50
+    atr_period: 14
+    pullback_lookback: 5
+    max_close_below_slow_atr: 0.5
+    stop_buffer_atr: 0.5
+    min_stop_atr: 1.0
+    max_stop_atr: 3.0
+    breakeven_at_r: 1.5
+    breakeven_buffer_r: 0.05
+    trail_atr_d1: 2.5
+    max_hold_days: 42
+    strong_adx: 30
+  breakout:
+    enabled: true
+    donchian_period: 20
+    atr_period: 14
+    breakout_buffer_atr: 0.2
+    stop_buffer_atr: 1.0
+    min_body_ratio: 0.5
+  mean_reversion:
+    enabled: true
+    bb_period: 20
+    bb_std: 2.0
+    rsi_period: 14
+    rsi_oversold: 35
+    rsi_overbought: 65
+    stop_buffer_atr: 0.75
+
+# ---------------------------------------------------------------------
+# BACKTEST PASS / FAIL CRITERIA (strategy_spec.md section 10)
+# ---------------------------------------------------------------------
+validation:
+  min_trades: 100
+  min_expectancy_r: 0.15
+  min_profit_factor: 1.3
+  max_drawdown_pct: 20.0
+  oos_fraction: 0.30
+  oos_min_profit_factor: 1.15
+  oos_min_expectancy_ratio: 0.60
+  min_profitable_symbol_share: 0.60
+  max_single_symbol_profit_share: 0.50
+  monte_carlo_runs: 10000
+  monte_carlo_max_dd_pct: 20.0
