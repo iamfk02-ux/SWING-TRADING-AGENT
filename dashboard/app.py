@@ -83,15 +83,19 @@ def is_bot_running() -> bool:
         return False
     try:
         pid = int(PID_FILE.read_text().strip())
-        # Check if process is alive on Windows
-        import ctypes
-        kernel32 = ctypes.windll.kernel32
-        PROCESS_QUERY_INFORMATION = 0x0400
-        handle = kernel32.OpenProcess(PROCESS_QUERY_INFORMATION, False, pid)
-        if handle:
-            kernel32.CloseHandle(handle)
+        if os.name == 'nt':
+            import ctypes
+            kernel32 = ctypes.windll.kernel32
+            PROCESS_QUERY_INFORMATION = 0x0400
+            handle = kernel32.OpenProcess(PROCESS_QUERY_INFORMATION, False, pid)
+            if handle:
+                kernel32.CloseHandle(handle)
+                return True
+            return False
+        else:
+            # Linux / Streamlit Community Cloud
+            os.kill(pid, 0)
             return True
-        return False
     except Exception:
         return False
 
