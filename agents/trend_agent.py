@@ -33,55 +33,64 @@ class TrendAgent:
         self,
         symbol: str,
         df_d1: pd.DataFrame,
-        df_h4: pd.DataFrame,
+        df_lower: pd.DataFrame,
         current_regime: str
     ) -> Optional[Dict[str, Any]]:
         """
-        Scans the latest bar of df_h4 against D1 regime.
+        Scans the latest bar of df_lower (H1 or H4) against D1 regime.
         Returns signal dict if valid setup & trigger occur, otherwise None.
         """
         if current_regime not in [Regime.TRENDING_UP.value, Regime.TRENDING_DOWN.value]:
             return None
 
-        if len(df_h4) < max(self.ema_slow_len, self.atr_period) + 10:
+        if len(df_lower) < max(self.ema_slow_len, self.atr_period) + 10:
             return None
 
-        # Calculate H4 indicators
-        h4_ema_fast = compute_ema(df_h4["close"], self.ema_fast_len)
-        h4_ema_slow = compute_ema(df_h4["close"], self.ema_slow_len)
-        h4_atr = compute_atr(df_h4, self.atr_period)
+        # Detect timeframe (H1 vs H4)
+        is_h1 = False
+        if len(df_lower) >= 2:
+            delta_sec = (pd.to_datetime(df_lower["timestamp"].iloc[-1]) - pd.to_datetime(df_lower["timestamp"].iloc[-2])).total_seconds()
+            if delta_sec <= 7200:
+                is_h1 = True
+        tf_name = "H1" if is_h1 else "H4"
+
+        # Calculate lower timeframe indicators
+        lower_ema_fast = compute_ema(df_lower["close"], self.ema_fast_len)
+        lower_ema_slow = compute_ema(df_lower["close"], self.ema_slow_len)
+        lower_atr = compute_atr(df_lower, self.atr_period)
         d1_adx = compute_adx(df_d1, 14)["adx"].iloc[-1]
 
-        curr_idx = len(df_h4) - 1
-        curr_bar = df_h4.iloc[curr_idx]
-        prev_bar = df_h4.iloc[curr_idx - 1]
-        atr_val = h4_atr.iloc[curr_idx]
+        curr_idx = len(df_lower) - 1
+        curr_bar = df_lower.iloc[curr_idx]
+        prev_bar = df_lower.iloc[curr_idx - 1]
+        atr_val = lower_atr.iloc[curr_idx]
 
         if atr_val <= 0 or np.isnan(atr_val):
             return None
 
-        # Lookback window for pullback
-        window_start = max(0, curr_idx - self.pullback_lookback)
-        pullback_window = df_h4.iloc[window_start:curr_idx]
+        # Lookback window for pullback (more candles for H1)
+        effective_lookback = self.pullback_lookback * 2 if is_h1 else self.pullback_lookback
+        window_start = max(0, curr_idx - effective_lookback)
+        pullback_window = df_lower.iloc[window_start:curr_idx]
 
         # -----------------------------
         # LONG SETUP (Trending Up)
         # -----------------------------
         if current_regime == Regime.TRENDING_UP.value:
             # 1. Pullback condition: low touched EMA20 in window
-            touched_ema20 = (pullback_window["low"] <= h4_ema_fast.iloc[window_start:curr_idx]).any()
+            touched_ema20 = (pullback_window["low"] <= lower_ema_fast.iloc[window_start:curr_idx]).any()
             if not touched_ema20:
                 return None
 
             # Must not close below EMA50 by more than 0.5 ATR
             violated_slow = (
-                pullback_window["close"] < (h4_ema_slow.iloc[window_start:curr_idx] - (self.max_close_beyond_slow_atr * atr_val))
+                pullback_window["close"] < (lower_ema_slow.iloc[window_start:curr_idx] - (self.max_close_beyond_slow_atr * atr_val))
             ).any()
             if violated_slow:
                 return None
 
             # 2. Trigger: current candle closes > prev high AND > EMA20
-            is_bullish_close = curr_bar["close"] > prev_bar["high"] and curr_bar["close"] > h4_ema_fast.iloc[curr_idx]
+            is_bullish_close = curr_bar["close"] > prev_bar["high"] and curr_bar["close"] > lower_ema_fast.iloc[curr_idx]
             if not is_bullish_close:
                 return None
 
@@ -97,9 +106,9 @@ class TrendAgent:
             confidence = 0.6
             if d1_adx >= self.strong_adx:
                 confidence += 0.1
-            if h4_ema_fast.iloc[curr_idx] > h4_ema_slow.iloc[curr_idx]:
+            if lower_ema_fast.iloc[curr_idx] > lower_ema_slow.iloc[curr_idx]:
                 confidence += 0.1
-            if not (pullback_window["close"] < h4_ema_slow.iloc[window_start:curr_idx]).any():
+            if not (pullback_window["close"] < lower_ema_slow.iloc[window_start:curr_idx]).any():
                 confidence += 0.1
             # Closed in top 25% of candle range
             candle_range = curr_bar["high"] - curr_bar["low"]
@@ -115,7 +124,7 @@ class TrendAgent:
                 "take_profit": None,  # Runner / Trailing
                 "confidence": min(1.0, confidence),
                 "regime": current_regime,
-                "reason": "D1 uptrend with H4 EMA20 pullback and bullish continuation close",
+                "reason": f"D1 uptrend with {tf_name} EMA20 pullback and bullish continuation close",
                 "timestamp": str(curr_bar["timestamp"])
             }
 
@@ -124,19 +133,19 @@ class TrendAgent:
         # -----------------------------
         if current_regime == Regime.TRENDING_DOWN.value:
             # 1. Pullback condition: high touched EMA20 in window
-            touched_ema20 = (pullback_window["high"] >= h4_ema_fast.iloc[window_start:curr_idx]).any()
+            touched_ema20 = (pullback_window["high"] >= lower_ema_fast.iloc[window_start:curr_idx]).any()
             if not touched_ema20:
                 return None
 
             # Must not close above EMA50 by more than 0.5 ATR
             violated_slow = (
-                pullback_window["close"] > (h4_ema_slow.iloc[window_start:curr_idx] + (self.max_close_beyond_slow_atr * atr_val))
+                pullback_window["close"] > (lower_ema_slow.iloc[window_start:curr_idx] + (self.max_close_beyond_slow_atr * atr_val))
             ).any()
             if violated_slow:
                 return None
 
             # 2. Trigger: current candle closes < prev low AND < EMA20
-            is_bearish_close = curr_bar["close"] < prev_bar["low"] and curr_bar["close"] < h4_ema_fast.iloc[curr_idx]
+            is_bearish_close = curr_bar["close"] < prev_bar["low"] and curr_bar["close"] < lower_ema_fast.iloc[curr_idx]
             if not is_bearish_close:
                 return None
 
@@ -152,9 +161,9 @@ class TrendAgent:
             confidence = 0.6
             if d1_adx >= self.strong_adx:
                 confidence += 0.1
-            if h4_ema_fast.iloc[curr_idx] < h4_ema_slow.iloc[curr_idx]:
+            if lower_ema_fast.iloc[curr_idx] < lower_ema_slow.iloc[curr_idx]:
                 confidence += 0.1
-            if not (pullback_window["close"] > h4_ema_slow.iloc[window_start:curr_idx]).any():
+            if not (pullback_window["close"] > lower_ema_slow.iloc[window_start:curr_idx]).any():
                 confidence += 0.1
             candle_range = curr_bar["high"] - curr_bar["low"]
             if candle_range > 0 and (curr_bar["high"] - curr_bar["close"]) / candle_range >= 0.75:
@@ -169,7 +178,7 @@ class TrendAgent:
                 "take_profit": None,
                 "confidence": min(1.0, confidence),
                 "regime": current_regime,
-                "reason": "D1 downtrend with H4 EMA20 pullback and bearish continuation close",
+                "reason": f"D1 downtrend with {tf_name} EMA20 pullback and bearish continuation close",
                 "timestamp": str(curr_bar["timestamp"])
             }
 

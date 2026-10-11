@@ -36,6 +36,27 @@ class RiskManager:
         Evaluates a signal against hard risk limits.
         Returns: (is_approved, rejection_reason, calculated_lots)
         """
+        from datetime import datetime
+        symbol = signal["symbol"].upper()
+
+        # 0. Weekend Market Status Check
+        # Crypto trades 24/7. Forex and Metals close on weekends (Friday 5pm EST to Sunday 5pm EST).
+        is_crypto = any(c in symbol for c in ["BTC", "ETH", "SOL", "CRYPTO", "BITCOIN", "LTC"])
+        
+        is_weekend = False
+        if "timestamp" in signal and signal["timestamp"]:
+            try:
+                import pandas as pd
+                ts = pd.to_datetime(signal["timestamp"])
+                is_weekend = ts.weekday() in (5, 6)
+            except Exception:
+                is_weekend = datetime.utcnow().weekday() in (5, 6)
+        else:
+            is_weekend = datetime.utcnow().weekday() in (5, 6)
+
+        if is_weekend and not is_crypto:
+            return False, f"WEEKEND: {symbol} market is closed. Crypto trades 24/7.", 0.0
+
         # 1. Kill Switch Check
         drawdown_pct = 0.0
         if peak_equity > 0:
@@ -49,9 +70,8 @@ class RiskManager:
             return False, f"MAX POSITIONS REACHED: {len(open_positions)}/{self.max_open_pos}", 0.0
 
         # 3. Duplicate position check (1 position per symbol)
-        symbol = signal["symbol"]
         for pos in open_positions:
-            if pos["symbol"] == symbol:
+            if pos["symbol"].upper() == symbol:
                 return False, f"ALREADY IN POSITION FOR {symbol}", 0.0
 
         # 4. Effective Risk calculation (Throttled if in drawdown)
@@ -68,22 +88,60 @@ class RiskManager:
         if stop_dist <= 0:
             return False, "INVALID STOP DISTANCE", 0.0
 
-        # Pip value estimation:
-        # For EURUSD, 1 pip = 0.0001 = $10 per 1 standard lot.
-        # For JPY pairs, 1 pip = 0.01 = approx $6.7 - $10 per lot.
-        pip_size = 0.01 if "JPY" in symbol else 0.0001
-        stop_pips = stop_dist / pip_size
+        # Determine exact lot size via MT5 contract specs or fallback formulas
+        raw_lots = 0.01
+        min_lot = 0.01
+        lot_step = 0.01
 
-        # In standard accounts: 1 lot = 100,000 units (~$10/pip).
-        # In cent accounts: 1 cent lot = 1,000 units (~$0.10/pip).
-        pip_val_per_lot = 10.0 if not self.is_cent_account else 0.10
+        mt5_connected = False
+        try:
+            import MetaTrader5 as mt5
+            info = mt5.symbol_info(symbol)
+            if info:
+                mt5_connected = True
+                min_lot = info.volume_min if info.volume_min > 0 else 0.01
+                lot_step = info.volume_step if info.volume_step > 0 else 0.01
+                tick_size = info.trade_tick_size if info.trade_tick_size > 0 else info.point
+                tick_val = info.trade_tick_value
+                if tick_size > 0 and tick_val > 0:
+                    ticks_at_risk = stop_dist / tick_size
+                    cost_per_lot = ticks_at_risk * tick_val
+                    if cost_per_lot > 0:
+                        raw_lots = risk_amount_usd / cost_per_lot
+        except Exception:
+            pass
 
-        raw_lots = risk_amount_usd / (stop_pips * pip_val_per_lot)
-        rounded_lots = round(max(0.01, raw_lots), 2)
+        if not mt5_connected:
+            # Universal fallback position sizing
+            if is_crypto:
+                # 1 standard lot = 1 coin (e.g. 1 BTC). Risk per 1 lot = stop_dist in USD.
+                raw_lots = risk_amount_usd / stop_dist
+                min_lot = 0.01
+            elif "XAU" in symbol or "GOLD" in symbol:
+                # 1 standard lot = 100 troy oz. $1 move = $100 per lot.
+                cost_per_lot = stop_dist * 100.0
+                raw_lots = risk_amount_usd / max(cost_per_lot, 1.0)
+                min_lot = 0.01
+            else:
+                # Standard Forex: pip math
+                pip_size = 0.01 if "JPY" in symbol else 0.0001
+                stop_pips = stop_dist / pip_size
+                pip_val_per_lot = 10.0 if not self.is_cent_account else 0.10
+                raw_lots = risk_amount_usd / max(stop_pips * pip_val_per_lot, 0.01)
+                min_lot = 0.01
 
-        # Check minimum lot risk
-        actual_risk_usd = rounded_lots * stop_pips * pip_val_per_lot
-        if actual_risk_usd > (account_equity * 0.02):  # Hard limit 2%
-            return False, f"MIN LOT TOO LARGE FOR ACCOUNT ({actual_risk_usd:.2f} > 2% cap)", 0.0
+        # Round to step and enforce minimum
+        steps = round(raw_lots / lot_step)
+        rounded_lots = round(max(min_lot, steps * lot_step), 2)
+
+        # Check maximum safety threshold (hard limit 2.5% of account on minimum lot)
+        # Prevent oversized fills on very small cent balances
+        if not is_crypto:
+            pip_size = 0.01 if "JPY" in symbol else 0.0001
+            stop_pips = stop_dist / pip_size
+            pip_val_per_lot = 10.0 if not self.is_cent_account else 0.10
+            actual_risk_usd = rounded_lots * stop_pips * pip_val_per_lot
+            if actual_risk_usd > (account_equity * 0.025):
+                return False, f"MIN LOT TOO LARGE FOR ACCOUNT (${actual_risk_usd:.2f} > 2.5% max risk cap)", 0.0
 
         return True, "APPROVED", rounded_lots

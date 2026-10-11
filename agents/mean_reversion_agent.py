@@ -31,17 +31,17 @@ class MeanReversionAgent:
         self,
         symbol: str,
         df_d1: pd.DataFrame,
-        df_h4: pd.DataFrame,
+        df_lower: pd.DataFrame,
         current_regime: str
     ) -> Optional[Dict[str, Any]]:
         """
-        Scans for Mean Reversion signal in ranging markets.
+        Scans for Mean Reversion signal in ranging markets using df_lower (H1 or H4) reversal triggers.
         """
         # Strict rule: Only active in confirmed Ranging regimes
         if current_regime != Regime.RANGING.value:
             return None
 
-        if len(df_d1) < max(self.bb_period, self.rsi_period) + 10 or len(df_h4) < 10:
+        if len(df_d1) < max(self.bb_period, self.rsi_period) + 10 or len(df_lower) < 10:
             return None
 
         bb_df = compute_bollinger_bands(df_d1["close"], self.bb_period, self.bb_std)
@@ -55,19 +55,19 @@ class MeanReversionAgent:
         bb_mid = bb_df["bb_mid"].iloc[-1]
         rsi_val = rsi_series.iloc[-1]
 
-        curr_h4 = df_h4.iloc[-1]
-        prev_h4 = df_h4.iloc[-2]
+        curr_bar = df_lower.iloc[-1]
+        prev_bar = df_lower.iloc[-2]
 
         # -----------------------------
         # LONG MEAN REVERSION
         # -----------------------------
         if last_d1_close <= bb_lower and rsi_val <= self.rsi_oversold:
-            # H4 Reversal Trigger: Bullish close above previous H4 high
-            if curr_h4["close"] > prev_h4["high"]:
-                sl = min(curr_h4["low"], prev_h4["low"]) - (self.stop_buffer_atr * d1_atr)
+            # Reversal Trigger: Bullish close above previous candle high
+            if curr_bar["close"] > prev_bar["high"]:
+                sl = min(curr_bar["low"], prev_bar["low"]) - (self.stop_buffer_atr * d1_atr)
                 tp = bb_mid
-                stop_dist = curr_h4["close"] - sl
-                tp_dist = tp - curr_h4["close"]
+                stop_dist = curr_bar["close"] - sl
+                tp_dist = tp - curr_bar["close"]
 
                 # Minimum reward ratio check (0.8R)
                 if tp_dist >= (0.8 * stop_dist) and stop_dist > 0:
@@ -81,25 +81,25 @@ class MeanReversionAgent:
                         "symbol": symbol,
                         "strategy": "MEAN_REVERSION",
                         "direction": "BUY",
-                        "entry": float(curr_h4["close"]),
+                        "entry": float(curr_bar["close"]),
                         "stop_loss": float(sl),
                         "take_profit": float(tp),
                         "confidence": min(1.0, confidence),
                         "regime": current_regime,
                         "reason": f"D1 Lower BB & RSI({rsi_val:.1f}) bounce targeting mean {tp:.5f}",
-                        "timestamp": str(curr_h4["timestamp"])
+                        "timestamp": str(curr_bar["timestamp"])
                     }
 
         # -----------------------------
         # SHORT MEAN REVERSION
         # -----------------------------
         if last_d1_close >= bb_upper and rsi_val >= self.rsi_overbought:
-            # H4 Reversal Trigger: Bearish close below previous H4 low
-            if curr_h4["close"] < prev_h4["low"]:
-                sl = max(curr_h4["high"], prev_h4["high"]) + (self.stop_buffer_atr * d1_atr)
+            # Reversal Trigger: Bearish close below previous candle low
+            if curr_bar["close"] < prev_bar["low"]:
+                sl = max(curr_bar["high"], prev_bar["high"]) + (self.stop_buffer_atr * d1_atr)
                 tp = bb_mid
-                stop_dist = sl - curr_h4["close"]
-                tp_dist = curr_h4["close"] - tp
+                stop_dist = sl - curr_bar["close"]
+                tp_dist = curr_bar["close"] - tp
 
                 if tp_dist >= (0.8 * stop_dist) and stop_dist > 0:
                     confidence = 0.6
@@ -112,13 +112,13 @@ class MeanReversionAgent:
                         "symbol": symbol,
                         "strategy": "MEAN_REVERSION",
                         "direction": "SELL",
-                        "entry": float(curr_h4["close"]),
+                        "entry": float(curr_bar["close"]),
                         "stop_loss": float(sl),
                         "take_profit": float(tp),
                         "confidence": min(1.0, confidence),
                         "regime": current_regime,
                         "reason": f"D1 Upper BB & RSI({rsi_val:.1f}) exhaustion targeting mean {tp:.5f}",
-                        "timestamp": str(curr_h4["timestamp"])
+                        "timestamp": str(curr_bar["timestamp"])
                     }
 
         return None

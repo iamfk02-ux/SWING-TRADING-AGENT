@@ -151,6 +151,13 @@ with st.sidebar:
             st.rerun()
 
     st.markdown("---")
+    st.subheader("⚙️ Active Bot Profile")
+    st.markdown("• **Timeframe:** `1-Hour (H1)` (Fast Pullbacks)")
+    st.markdown("• **Regime Filter:** `Daily (D1)` (Macro Safety)")
+    st.markdown("• **Crypto Weekend:** `24/7 Active`")
+    st.markdown("• **Risk Per Trade:** `1.0% Hard Cap`")
+
+    st.markdown("---")
     st.subheader("🔔 Telegram Alerts")
     st.write("Connected to: **@Wondatrade_bot** ✅")
 
@@ -163,6 +170,13 @@ with st.sidebar:
 # MAIN HEADER & ACCOUNT METRICS
 # -------------------------------------------------------------
 st.title("Trading Bot — Command Center")
+
+# Live market banner
+is_wknd = datetime.utcnow().weekday() in (5, 6)
+if is_wknd:
+    st.info("🕒 **Weekend Mode Active:** Traditional Forex and Metals markets are closed. The bot is scanning Crypto pairs 24/7 (BTCUSD, ETHUSD, SOLUSD). Forex resumes Sunday 5:00 PM EST.")
+else:
+    st.success("🟢 **Weekday Market Active:** Actively scanning Forex, Gold (XAUUSD), and Crypto on **1-Hour (H1)** candles every 5 minutes.")
 
 try:
     import MetaTrader5 as mt5
@@ -218,6 +232,25 @@ with tab_positions:
             st.info("No trades currently open. The bot will open positions automatically when an approved setup appears at a candle close.")
     else:
         st.error("Please ensure your MetaTrader 5 terminal is open.")
+
+    st.markdown("---")
+    with st.expander("ℹ️ How 1-Hour (H1) Scanning & 24/7 Crypto Weekend Trading Work", expanded=False):
+        st.markdown("""
+        ### ⚡ Faster Trade Opportunities with 1-Hour (H1) Scanning
+        - **Why we added H1 scanning:** Waiting for 4-Hour (H4) or Daily setups can take days or even weeks.
+        - **How it works:** The bot uses the **Daily (D1)** chart for macro trend & market regime direction, while scanning **1-Hour (H1)** candles every 5 minutes to catch intraday pullback entry triggers.
+        - **Result:** You get **4x more trade setups** every week while keeping the strict protection of the Daily macro trend!
+
+        ---
+
+        ### 🪙 24/7 Crypto Weekend Trading
+        - **Forex & Gold:** Close on Friday 5:00 PM EST and reopen Sunday 5:00 PM EST.
+        - **Crypto (BTCUSD, ETHUSD, SOLUSD):** Trades 24 hours a day, 7 days a week, 365 days a year.
+        - **Trading Crypto on weekends:**
+          1. The bot is fully programmed to scan and trade crypto 24/7.
+          2. The default `MetaQuotes-Demo` broker only provides Forex, Metals, and US Nasdaq ETFs (which close on weekends).
+          3. To trade crypto on weekends with demo money, open a free Demo account in MT5 with a broker offering Crypto CFDs (e.g., Exness, IC Markets, Bybit MT5). Inside MT5: *File -> Open an Account -> Search 'Exness' -> Open Demo*. The bot will automatically detect it!
+        """)
 
 # TAB 2: HUMAN NEWS DESK
 with tab_news:
@@ -374,23 +407,34 @@ with tab_signals:
 with tab_backtest:
     st.subheader("Test Strategies on Past Data")
     st.write(
-        "Use the slider below to choose how far back into the past you want to simulate. "
+        "Use the controls below to choose the timeframe and lookback depth into past market history. "
         "The bot will analyze every candle across all pairs and report profit, win rate, and maximum drawdown."
     )
 
-    col_slider, col_btn = st.columns([2, 1])
+    col_tf, col_slider, col_btn = st.columns([1.2, 1.8, 1])
+
+    with col_tf:
+        tf_option = st.selectbox(
+            "Scanning Timeframe:",
+            ["1-Hour (H1) - High Frequency (Active)", "4-Hour (H4) - Classic Swing"],
+            index=0
+        )
+        tf_code = "H1" if "H1" in tf_option else "H4"
 
     with col_slider:
+        default_bars = 2000 if tf_code == "H1" else 1500
         lookback_bars = st.slider(
-            "Historical Depth (4-Hour Candles)",
+            f"Historical Depth ({tf_code} Candles)",
             min_value=500,
-            max_value=10000,
-            value=1500,
+            max_value=8000,
+            value=default_bars,
             step=500,
-            help="1,500 bars ≈ 1 year of trading. 10,000 bars ≈ 6.5 years."
+            help="Select how many historical candles to backtest."
         )
-        approx_months = round(lookback_bars / 125, 1)
-        st.caption(f"⏱️ **Estimated Test Period:** ~{approx_months} months (~{round(approx_months/12, 1)} years of market history)")
+        bars_per_day = 24 if tf_code == "H1" else 6
+        approx_days = round(lookback_bars / bars_per_day)
+        approx_months = round(approx_days / 30, 1)
+        st.caption(f"⏱️ **Estimated Test Period:** ~{approx_days} days (~{approx_months} months of market history)")
 
     with col_btn:
         st.write("")
@@ -398,10 +442,10 @@ with tab_backtest:
         run_btn = st.button("▶️ Run Backtest Now", type="primary", use_container_width=True)
 
     if run_btn:
-        with st.spinner(f"Simulating past ~{approx_months} months across all 10 forex pairs..."):
+        with st.spinner(f"Simulating past ~{approx_months} months across all portfolio pairs on {tf_code} candles..."):
             root_dir = Path(__file__).resolve().parent.parent
             result = subprocess.run(
-                [sys.executable, str(root_dir / "run_test.py"), str(lookback_bars)],
+                [sys.executable, str(root_dir / "run_test.py"), str(lookback_bars), tf_code],
                 capture_output=True,
                 text=True,
                 cwd=str(root_dir)

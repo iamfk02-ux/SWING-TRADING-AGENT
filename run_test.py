@@ -26,13 +26,20 @@ def main():
     with open(config_path, "r") as f:
         config = yaml.safe_load(f)
 
-    # Allow custom bar count override from CLI / Dashboard slider
+    # Allow custom bar count and timeframe override from CLI / Dashboard
+    timeframe = config.get("data", {}).get("timeframe", "H1").upper()
     if len(sys.argv) > 1:
         try:
-            custom_h4 = int(sys.argv[1])
-            config.setdefault("data", {})["h4_bars"] = custom_h4
-            config["data"]["d1_bars"] = max(200, custom_h4 // 5)
-            print(f"[*] Custom Lookback Applied: {custom_h4} H4 bars (~{round(custom_h4 / 1500, 1)} years)")
+            custom_bars = int(sys.argv[1])
+            if len(sys.argv) > 2:
+                timeframe = sys.argv[2].upper()
+            config.setdefault("data", {})["timeframe"] = timeframe
+            if timeframe == "H1":
+                config["data"]["h1_bars"] = custom_bars
+            else:
+                config["data"]["h4_bars"] = custom_bars
+            config["data"]["d1_bars"] = max(200, custom_bars // (24 if timeframe == "H1" else 6))
+            print(f"[*] Custom Lookback Applied: {custom_bars} {timeframe} bars")
         except ValueError:
             pass
 
@@ -41,16 +48,18 @@ def main():
     data_agent = DataAgent(config)
     engine = BacktestEngine(config)
 
-    symbols = config.get("symbols", {}).get("forex", ["EURUSD", "GBPUSD"])
-    print(f"\nSimulating 3-strategy portfolio across {len(symbols)} symbols...")
+    forex_syms = config.get("symbols", {}).get("forex", ["EURUSD", "GBPUSD"])
+    metal_syms = config.get("symbols", {}).get("metals", ["XAUUSD"])
+    symbols = forex_syms + metal_syms
+    print(f"\nSimulating 3-strategy portfolio across {len(symbols)} symbols ({timeframe} candles)...")
     print("-" * 70)
     print(f"{'SYMBOL':<10} | {'TRADES':<7} | {'WIN RATE':<9} | {'EXP (R)':<8} | {'PF':<6} | {'MAX DD':<7} | {'PROFIT'}")
     print("-" * 70)
 
     all_results = []
     for sym in symbols:
-        df_d1, df_h4 = data_agent.get_bars(sym)
-        res = engine.run(sym, df_d1, df_h4)
+        df_d1, df_lower = data_agent.get_bars(sym, timeframe=timeframe)
+        res = engine.run(sym, df_d1, df_lower)
         m = res["metrics"]
         all_results.append(m)
         print(f"{sym:<10} | {m['total_trades']:<7} | {m['win_rate_pct']:<8}% | {m['expectancy_r']:<8} | {m['profit_factor']:<6} | {m['max_drawdown_pct']:<6}% | ${m['net_profit_usd']}")

@@ -37,10 +37,12 @@ mt5:
   symbol_suffix: ""
 
 # ---------------------------------------------------------------------
-# DATA
+# DATA & TIMEFRAMES
 # ---------------------------------------------------------------------
 data:
   source: mt5
+  timeframe: H1      # Lower timeframe scanning: "H1" (1-Hour candles) for fast setups, or "H4" (4-Hour)
+  h1_bars: 2000      # ~3 months of 1-hour candles for live scanning
   h4_bars: 1000      # ~6 months of 4-hour candles for live scanning
   d1_bars: 400       # ~1.5 years of daily candles for live scanning
 
@@ -59,13 +61,14 @@ symbols:
     - EURGBP
     - AUDNZD
     - EURJPY
-  # These "auto-unlock": watched always, traded only when the account is big
-  # enough that the broker's minimum lot fits inside the risk limit.
+  # Metals: high volatility, active during weekdays
   metals:
     - XAUUSD
+  # Crypto: traded 24/7 including weekends!
   crypto:
     - BTCUSD
     - ETHUSD
+    - SOLUSD
 
 # ---------------------------------------------------------------------
 # RISK MANAGER  (hard rules - the optimizer can never change these)

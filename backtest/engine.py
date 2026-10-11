@@ -34,9 +34,9 @@ class BacktestEngine:
         self.commission_per_lot = float(acct_cfg.get("commission_per_lot", 0.0))
         self.is_cent = acct_cfg.get("type", "cent") == "cent"
 
-    def run(self, symbol: str, df_d1: pd.DataFrame, df_h4: pd.DataFrame) -> Dict[str, Any]:
+    def run(self, symbol: str, df_d1: pd.DataFrame, df_lower: pd.DataFrame) -> Dict[str, Any]:
         """
-        Executes backtest over historical H4 bars with daily regime alignment.
+        Executes backtest over historical lower timeframe bars (H1 or H4) with daily regime alignment.
         """
         # 1. Precalculate D1 regimes
         d1_regimes = self.regime_agent.calculate_regime_series(df_d1)
@@ -55,12 +55,12 @@ class BacktestEngine:
         pip_size = 0.01 if "JPY" in symbol else 0.0001
         pip_val = 10.0 if not self.is_cent else 0.10
 
-        # Scan each H4 bar sequentially
-        for i in range(50, len(df_h4)):
-            curr_h4_bar = df_h4.iloc[i]
-            bar_time = curr_h4_bar["timestamp"]
+        # Scan each lower timeframe bar sequentially
+        for i in range(50, len(df_lower)):
+            curr_lower_bar = df_lower.iloc[i]
+            bar_time = curr_lower_bar["timestamp"]
 
-            # Lookup latest closed D1 regime before this H4 bar
+            # Lookup latest closed D1 regime before this lower bar
             prior_d1 = df_d1_mapped.loc[df_d1_mapped.index <= bar_time]
             if len(prior_d1) == 0:
                 continue
@@ -79,8 +79,8 @@ class BacktestEngine:
                 risk_dist = trade["initial_risk_dist"]
                 lots = trade["lots"]
 
-                high = curr_h4_bar["high"]
-                low = curr_h4_bar["low"]
+                high = curr_lower_bar["high"]
+                low = curr_lower_bar["low"]
 
                 closed = False
                 exit_price = 0.0
@@ -147,11 +147,11 @@ class BacktestEngine:
             # ----------------------------------------------------
             # 2. SCAN FOR NEW SIGNALS (ALL 3 AGENTS)
             # ----------------------------------------------------
-            h4_slice = df_h4.iloc[: i + 1]
+            lower_slice = df_lower.iloc[: i + 1]
             candidates = []
 
             # 1. Trend
-            s_trend = self.trend_agent.scan_for_signal(symbol, df_d1, h4_slice, current_regime)
+            s_trend = self.trend_agent.scan_for_signal(symbol, df_d1, lower_slice, current_regime)
             if s_trend: candidates.append(s_trend)
 
             # 2. Breakout
@@ -159,7 +159,7 @@ class BacktestEngine:
             if s_break: candidates.append(s_break)
 
             # 3. Mean-Reversion
-            s_mr = self.mean_rev_agent.scan_for_signal(symbol, df_d1, h4_slice, current_regime)
+            s_mr = self.mean_rev_agent.scan_for_signal(symbol, df_d1, lower_slice, current_regime)
             if s_mr: candidates.append(s_mr)
 
             for signal in candidates:
