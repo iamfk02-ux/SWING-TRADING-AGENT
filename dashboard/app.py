@@ -306,10 +306,13 @@ with st.sidebar:
             time.sleep(1)
             st.rerun()
 
+    active_tf = config.get("data", {}).get("timeframe", "H4").upper()
     st.markdown("---")
     st.subheader("⚙️ Active Bot Profile")
-    st.markdown("• **Timeframe:** `1-Hour (H1)` (Fast Pullbacks)")
+    st.markdown(f"• **Timeframe:** `{active_tf}` ({'4-Hour Swing' if active_tf == 'H4' else '1-Hour Fast'})")
     st.markdown("• **Regime Filter:** `Daily (D1)` (Macro Safety)")
+    st.markdown("• **Order Types:** `Limit & Stop Pending`")
+    st.markdown("• **Pending Expiration:** `24 Hours`")
     st.markdown("• **Crypto Weekend:** `24/7 Active`")
     st.markdown("• **Risk Per Trade:** `1.0% Hard Cap`")
 
@@ -332,7 +335,7 @@ is_wknd = datetime.utcnow().weekday() in (5, 6)
 if is_wknd:
     st.info("🕒 **Weekend Mode Active:** Traditional Forex and Metals markets are closed. The bot is scanning Crypto pairs 24/7 (BTCUSD, ETHUSD, SOLUSD). Forex resumes Sunday 5:00 PM EST.")
 else:
-    st.success("🟢 **Weekday Market Active:** Actively scanning Forex, Gold (XAUUSD), and Crypto on **1-Hour (H1)** candles every 5 minutes.")
+    st.success(f"🟢 **Weekday Market Active:** Actively scanning Forex, Gold (XAUUSD), and Crypto on **{active_tf} ({'4-Hour Swing' if active_tf == 'H4' else '1-Hour'})** candles every 5 minutes.")
 
 try:
     import MetaTrader5 as mt5
