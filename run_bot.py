@@ -119,7 +119,8 @@ def run_cycle(cycle_num: int = 1) -> int:
         append_live_log(f"🟢 Weekday Active: Full portfolio universe active ({len(symbols_to_scan)} symbols across Forex, Metals, Crypto).")
 
     open_positions = exec_agent.get_open_positions()
-    append_live_log(f"Active MT5 Positions: {len(open_positions)}")
+    pending_orders = exec_agent.get_pending_orders()
+    append_live_log(f"Active MT5 Positions: {len(open_positions)} | Pending Orders: {len(pending_orders)}")
 
     notifier = TelegramNotifier(config)
 
@@ -320,28 +321,35 @@ def run_cycle(cycle_num: int = 1) -> int:
 
             if scorer.is_eligible(score):
                 approved, reason, lots = risk_manager.evaluate_order(
-                    signal, equity, balance, open_positions
+                    signal, equity, balance, open_positions, pending_orders=pending_orders
                 )
                 signal["status"] = "APPROVED" if approved else "REJECTED_BY_RISK"
                 signal["rejection_reason"] = reason
                 log_signal(signal)
 
+                order_type_str = signal.get("order_type", "MARKET")
+                expiry_h = config.get("risk", {}).get("pending_order_expiry_hours", 24)
+
                 if approved:
                     action_badge = "🚀 ORDER PLACED"
-                    append_live_log(f"✅ [{actual_sym}] RISK APPROVED! Placing {lots} lots | SL: {signal['stop_loss']:.5f} | TP: {signal.get('take_profit') or 'Trailing'}")
+                    target_entry_txt = f"{signal['entry']:.5f} ({order_type_str})" if order_type_str != "MARKET" else "Market"
+                    append_live_log(f"✅ [{actual_sym}] RISK APPROVED! Placing {order_type_str} {lots} lots @ {target_entry_txt} | SL: {signal['stop_loss']:.5f} | TP: {signal.get('take_profit') or 'Trailing'}")
                     ticket = exec_agent.place_order(
                         symbol=actual_sym,
                         direction=signal["direction"],
                         lots=lots,
                         stop_loss=signal["stop_loss"],
                         take_profit=signal.get("take_profit"),
-                        strategy_name=signal["strategy"]
+                        strategy_name=signal["strategy"],
+                        order_type_str=order_type_str,
+                        entry_price=signal.get("entry"),
+                        expiration_hours=expiry_h
                     )
                     if ticket:
-                        append_live_log(f"🎉 [{actual_sym}] Live Order Placed in MT5! Order Ticket #{ticket}")
+                        append_live_log(f"🎉 [{actual_sym}] Live {order_type_str} Order Placed in MT5! Ticket #{ticket} (Auto-exp: {expiry_h}h)")
                         notifier.notify_trade_opened(
                             symbol=actual_sym,
-                            direction=signal["direction"],
+                            direction=f"{signal['direction']} ({order_type_str})",
                             lots=lots,
                             entry=signal["entry"],
                             sl=signal["stop_loss"],

@@ -49,7 +49,7 @@ mt5:
 # ---------------------------------------------------------------------
 data:
   source: mt5
-  timeframe: H1      # Lower timeframe scanning: "H1" (1-Hour candles) for fast setups, or "H4" (4-Hour)
+  timeframe: H4      # Institutional Swing Timeframe: "H4" (4-Hour candles) for clean signals
   h1_bars: 2000      # ~3 months of 1-hour candles for live scanning
   h4_bars: 1000      # ~6 months of 4-hour candles for live scanning
   d1_bars: 400       # ~1.5 years of daily candles for live scanning
@@ -88,6 +88,8 @@ risk:
   max_total_open_risk_pct: 3.0
   max_currency_exposure_pct: 2.0   # net risk on any single currency
   max_crypto_risk_pct: 1.0         # BTC + ETH combined
+  pending_orders_enabled: true     # Use Limit orders on pullbacks & Stop orders on breakouts
+  pending_order_expiry_hours: 24   # Auto-cancel pending orders if unfilled after 24 hours (6 H4 candles)
   daily_loss_limit_pct: 3.0
   weekly_loss_limit_pct: 5.0
   drawdown_throttle_pct: 10.0      # from peak -> risk is halved

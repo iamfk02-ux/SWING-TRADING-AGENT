@@ -46,14 +46,16 @@ class RiskManager:
         account_equity: float,
         peak_equity: float,
         open_positions: List[Dict[str, Any]],
+        pending_orders: Optional[List[Dict[str, Any]]] = None,
         current_spread_pips: float = 1.5
     ) -> Tuple[bool, str, float]:
         """
-        Evaluates a signal against hard risk limits.
+        Evaluates a signal against hard risk limits (checking active positions + pending orders).
         Returns: (is_approved, rejection_reason, calculated_lots)
         """
         from datetime import datetime
         symbol = signal["symbol"].upper()
+        pending_orders = pending_orders or []
 
         # 0. Weekend Market Status Check
         # Crypto trades 24/7. Forex and Metals close on weekends (Friday 5pm EST to Sunday 5pm EST).
@@ -87,26 +89,32 @@ class RiskManager:
         if drawdown_pct >= self.kill_switch_pct:
             return False, f"KILL SWITCH ACTIVE: Drawdown {drawdown_pct:.1f}% >= {self.kill_switch_pct}%", 0.0
 
-        # 2. Maximum open positions
-        if len(open_positions) >= self.max_open_pos:
-            return False, f"MAX POSITIONS REACHED: {len(open_positions)}/{self.max_open_pos}", 0.0
+        # 2. Maximum open positions (positions + pending)
+        total_active_orders = len(open_positions) + len(pending_orders)
+        if total_active_orders >= self.max_open_pos:
+            return False, f"MAX POSITIONS REACHED: {total_active_orders}/{self.max_open_pos} (including pending)", 0.0
 
-        # 3. Duplicate position check (1 position per symbol)
+        # 3. Duplicate check (1 trade/order per symbol)
         for pos in open_positions:
             if pos["symbol"].upper() == symbol:
                 return False, f"ALREADY IN POSITION FOR {symbol}", 0.0
+
+        for pend in pending_orders:
+            if pend["symbol"].upper() == symbol:
+                return False, f"PENDING ORDER ALREADY ACTIVE FOR {symbol}", 0.0
 
         # 3.5 Currency Correlation & Clustered Exposure Guard
         # Prevents stacking multiple trades sharing the same base/quote currency (e.g. buying EURUSD, GBPUSD, AUDUSD simultaneously)
         candidate_currencies = self._get_currency_components(symbol)
         curr_counts = {}
-        for pos in open_positions:
+        all_committed = open_positions + pending_orders
+        for pos in all_committed:
             for c in self._get_currency_components(pos.get("symbol", "")):
                 curr_counts[c] = curr_counts.get(c, 0) + 1
 
         for c in candidate_currencies:
             if curr_counts.get(c, 0) >= 2:
-                return False, f"CORRELATION LIMIT: Maximum exposure for currency '{c}' reached ({curr_counts[c]} active positions)", 0.0
+                return False, f"CORRELATION LIMIT: Maximum exposure for currency '{c}' reached ({curr_counts[c]} active/pending)", 0.0
 
         # 4. Effective Risk calculation (Throttled if in drawdown)
         effective_risk_pct = self.risk_pct

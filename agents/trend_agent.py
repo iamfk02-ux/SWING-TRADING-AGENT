@@ -111,20 +111,25 @@ class TrendAgent:
             if not (pullback_window["close"] < lower_ema_slow.iloc[window_start:curr_idx]).any():
                 confidence += 0.1
             # Closed in top 25% of candle range
-            candle_range = curr_bar["high"] - curr_bar["low"]
-            if candle_range > 0 and (curr_bar["close"] - curr_bar["low"]) / candle_range >= 0.75:
-                confidence += 0.1
+            # Optimal Limit Entry: 50% retrace between breakout close and EMA20 (or exact EMA20)
+            ema_target = float(lower_ema_fast.iloc[curr_idx])
+            limit_price = round(curr_bar["close"] - 0.3 * (curr_bar["close"] - ema_target), 5)
+            # Ensure limit is below current price
+            if limit_price >= curr_bar["close"]:
+                limit_price = round(curr_bar["close"] - 0.1 * atr_val, 5)
 
             return {
                 "symbol": symbol,
                 "strategy": "TREND",
                 "direction": "BUY",
-                "entry": float(curr_bar["close"]),
+                "order_type": "LIMIT",
+                "entry": float(limit_price),
+                "market_price": float(curr_bar["close"]),
                 "stop_loss": float(sl),
                 "take_profit": None,  # Runner / Trailing
                 "confidence": min(1.0, confidence),
                 "regime": current_regime,
-                "reason": f"D1 uptrend with {tf_name} EMA20 pullback and bullish continuation close",
+                "reason": f"D1 uptrend with {tf_name} EMA20 pullback: Buy Limit at discount {limit_price:.5f}",
                 "timestamp": str(curr_bar["timestamp"])
             }
 
@@ -165,20 +170,25 @@ class TrendAgent:
                 confidence += 0.1
             if not (pullback_window["close"] > lower_ema_slow.iloc[window_start:curr_idx]).any():
                 confidence += 0.1
-            candle_range = curr_bar["high"] - curr_bar["low"]
-            if candle_range > 0 and (curr_bar["high"] - curr_bar["close"]) / candle_range >= 0.75:
-                confidence += 0.1
+            # Optimal Limit Entry: 50% retrace between breakdown close and EMA20
+            ema_target = float(lower_ema_fast.iloc[curr_idx])
+            limit_price = round(curr_bar["close"] + 0.3 * (ema_target - curr_bar["close"]), 5)
+            # Ensure limit is above current price
+            if limit_price <= curr_bar["close"]:
+                limit_price = round(curr_bar["close"] + 0.1 * atr_val, 5)
 
             return {
                 "symbol": symbol,
                 "strategy": "TREND",
                 "direction": "SELL",
-                "entry": float(curr_bar["close"]),
+                "order_type": "LIMIT",
+                "entry": float(limit_price),
+                "market_price": float(curr_bar["close"]),
                 "stop_loss": float(sl),
                 "take_profit": None,
                 "confidence": min(1.0, confidence),
                 "regime": current_regime,
-                "reason": f"D1 downtrend with {tf_name} EMA20 pullback and bearish continuation close",
+                "reason": f"D1 downtrend with {tf_name} EMA20 pullback: Sell Limit at discount {limit_price:.5f}",
                 "timestamp": str(curr_bar["timestamp"])
             }
 

@@ -469,7 +469,25 @@ with tab_positions:
             } for p in positions])
             st.dataframe(df_pos, use_container_width=True)
         else:
-            st.info("No trades currently open. The bot will open positions automatically when an approved setup appears at a candle close.")
+            st.info("No active positions currently running in MT5.")
+
+        # Pending Orders Section (Limit & Stop Orders)
+        pending_orders = mt5.orders_get()
+        st.markdown("#### ⏳ Pending Orders (Limit & Stop Orders)")
+        if pending_orders and len(pending_orders) > 0:
+            df_pend = pd.DataFrame([{
+                "Ticket": o.ticket,
+                "Symbol": o.symbol,
+                "Type": "BUY LIMIT" if o.type == 2 else ("SELL LIMIT" if o.type == 3 else ("BUY STOP" if o.type == 4 else "SELL STOP")),
+                "Volume": o.volume_initial,
+                "Limit Price": o.price_open,
+                "Stop Loss": o.sl,
+                "Take Profit": o.tp if o.tp > 0 else "Trailing",
+                "Auto Expiration": "24 Hours (Active)"
+            } for o in pending_orders])
+            st.dataframe(df_pend, use_container_width=True)
+        else:
+            st.caption("No pending orders waiting. When a pullback setup forms, the bot places Buy/Sell Limits at optimal discount prices.")
     else:
         st.error("Please ensure your MetaTrader 5 terminal is open.")
 
