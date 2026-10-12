@@ -631,15 +631,15 @@ with tab_news:
 # TAB 3: DECISION LOG
 with tab_signals:
     st.subheader("Bot Decision Log (Every Setup Checked)")
-    st.write("Here you can see every single trade the bot considered, and why it was taken or rejected.")
+    st.caption("Sorted newest to oldest. When an active trade is running, subsequent scans safely block opening duplicates for the same pair.")
     if DB_PATH.exists():
         with sqlite3.connect(DB_PATH) as conn:
             df_sig = pd.read_sql_query(
-                "SELECT timestamp, symbol, strategy, direction, score, status, rejection_reason FROM signals ORDER BY id DESC LIMIT 50",
+                "SELECT id, timestamp, symbol, strategy, direction, score, status, rejection_reason FROM signals ORDER BY id DESC LIMIT 50",
                 conn
             )
             if not df_sig.empty:
-                st.dataframe(df_sig, use_container_width=True)
+                st.dataframe(df_sig, use_container_width=True, hide_index=True)
             else:
                 st.info("No signals recorded yet. As market cycles close, every decision will appear here.")
 
