@@ -24,6 +24,14 @@ telegram:
   chat_id: "1968991910"             # your telegram chat id from @userinfobot (free)
 
 # ---------------------------------------------------------------------
+# ECONOMIC CALENDAR & NEWS SHIELD (ForexFactory integration)
+# ---------------------------------------------------------------------
+news:
+  enabled: true                    # Automatically blocks trades during high-impact news
+  blackout_minutes_before: 30      # Minutes before high-impact release to pause entries
+  blackout_minutes_after: 30       # Minutes after high-impact release to pause entries
+
+# ---------------------------------------------------------------------
 # MT5 CONNECTION
 # Leave login/password/server empty if MT5 is already open and logged in.
 # ---------------------------------------------------------------------

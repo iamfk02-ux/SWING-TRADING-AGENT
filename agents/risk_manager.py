@@ -23,6 +23,22 @@ class RiskManager:
         self.throttle_pct = risk_cfg.get("drawdown_throttle_pct", 10.0)
         self.kill_switch_pct = risk_cfg.get("kill_switch_drawdown_pct", 20.0)
         self.is_cent_account = config.get("account", {}).get("type", "cent") == "cent"
+        
+        # News Guard (Economic Calendar Filter)
+        try:
+            from core.news_guard import NewsGuard
+            self.news_guard = NewsGuard(config)
+        except Exception:
+            self.news_guard = None
+
+    def _get_currency_components(self, symbol: str) -> List[str]:
+        """Extracts individual currencies from a symbol string."""
+        s = symbol.upper().replace(".C", "").replace("M", "").replace(".RAW", "")
+        if "XAU" in s or "GOLD" in s or "OIL" in s or "US30" in s:
+            return ["USD"]
+        if len(s) >= 6 and not any(c in s for c in ["BTC", "ETH", "SOL"]):
+            return [s[:3], s[3:6]]
+        return [s]
 
     def evaluate_order(
         self,
@@ -57,6 +73,12 @@ class RiskManager:
         if is_weekend and not is_crypto:
             return False, f"WEEKEND: {symbol} market is closed. Crypto trades 24/7.", 0.0
 
+        # 0.5 High-Impact News Filter (Economic Calendar Shield)
+        if self.news_guard:
+            is_blocked_news, news_reason = self.news_guard.check_symbol_news(symbol)
+            if is_blocked_news:
+                return False, f"NEWS SHIELD: {news_reason}", 0.0
+
         # 1. Kill Switch Check
         drawdown_pct = 0.0
         if peak_equity > 0:
@@ -73,6 +95,18 @@ class RiskManager:
         for pos in open_positions:
             if pos["symbol"].upper() == symbol:
                 return False, f"ALREADY IN POSITION FOR {symbol}", 0.0
+
+        # 3.5 Currency Correlation & Clustered Exposure Guard
+        # Prevents stacking multiple trades sharing the same base/quote currency (e.g. buying EURUSD, GBPUSD, AUDUSD simultaneously)
+        candidate_currencies = self._get_currency_components(symbol)
+        curr_counts = {}
+        for pos in open_positions:
+            for c in self._get_currency_components(pos.get("symbol", "")):
+                curr_counts[c] = curr_counts.get(c, 0) + 1
+
+        for c in candidate_currencies:
+            if curr_counts.get(c, 0) >= 2:
+                return False, f"CORRELATION LIMIT: Maximum exposure for currency '{c}' reached ({curr_counts[c]} active positions)", 0.0
 
         # 4. Effective Risk calculation (Throttled if in drawdown)
         effective_risk_pct = self.risk_pct
