@@ -306,6 +306,12 @@ with st.sidebar:
             time.sleep(1)
             st.rerun()
 
+    # Load config safely
+    config = {}
+    if CONFIG_PATH.exists():
+        with open(CONFIG_PATH, "r") as f:
+            config = yaml.safe_load(f) or {}
+
     active_tf = config.get("data", {}).get("timeframe", "H4").upper()
     st.markdown("---")
     st.subheader("⚙️ Active Bot Profile")
