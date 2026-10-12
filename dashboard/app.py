@@ -83,6 +83,132 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+import streamlit.components.v1 as components
+
+
+def render_live_countdown(seconds_left: int, is_running: bool, label: str = "Next Market Scan In"):
+    """
+    Renders a live client-side JavaScript ticking countdown clock in the browser.
+    Ticks down every second (1000ms) without causing screen flickering.
+    """
+    js_running = "true" if is_running else "false"
+    html_code = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <style>
+        body {{
+          margin: 0;
+          padding: 0;
+          background-color: transparent;
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+          color: #FAFAFA;
+        }}
+        .timer-card {{
+          background-color: #1E232A;
+          border: 1px solid #2D3748;
+          border-radius: 8px;
+          padding: 9px 12px;
+          box-sizing: border-box;
+        }}
+        .timer-label {{
+          font-size: 0.80rem;
+          color: #A0AEC0;
+          font-weight: 500;
+          margin-bottom: 2px;
+          text-transform: uppercase;
+          letter-spacing: 0.4px;
+        }}
+        .timer-value {{
+          font-size: 1.70rem;
+          font-weight: 700;
+          color: #10B981;
+          font-variant-numeric: tabular-nums;
+          letter-spacing: 0.5px;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }}
+        .timer-sub {{
+          font-size: 0.74rem;
+          color: #718096;
+          margin-top: 2px;
+        }}
+        .pulse-dot {{
+          width: 9px;
+          height: 9px;
+          border-radius: 50%;
+          background: #10B981;
+          display: inline-block;
+          animation: pulse 1.5s infinite;
+        }}
+        @keyframes pulse {{
+          0% {{ opacity: 1; transform: scale(0.95); }}
+          50% {{ opacity: 0.35; transform: scale(1.15); }}
+          100% {{ opacity: 1; transform: scale(0.95); }}
+        }}
+      </style>
+    </head>
+    <body>
+      <div class="timer-card">
+        <div class="timer-label">{label}</div>
+        <div class="timer-value" id="clock-display">
+          <span class="pulse-dot" id="pulse-indicator"></span>
+          <span id="digits">--:--</span>
+        </div>
+        <div class="timer-sub" id="clock-sub">Ticking live every second ⏱️</div>
+      </div>
+
+      <script>
+        let remaining = {seconds_left};
+        const active = {js_running};
+
+        function tick() {{
+          const digits = document.getElementById("digits");
+          const sub = document.getElementById("clock-sub");
+          const dot = document.getElementById("pulse-indicator");
+
+          if (!active) {{
+            digits.innerText = "PAUSED";
+            digits.style.color = "#EF4444";
+            dot.style.background = "#EF4444";
+            dot.style.animation = "none";
+            sub.innerText = "Start bot to begin countdown";
+            return;
+          }}
+
+          if (remaining <= 0) {{
+            digits.innerText = "SCANNING NOW...";
+            digits.style.color = "#F59E0B";
+            dot.style.background = "#F59E0B";
+            sub.innerText = "Evaluating all pairs across market...";
+            setTimeout(() => {{
+              try {{ window.parent.location.reload(); }} catch(e) {{}}
+            }}, 3000);
+            return;
+          }}
+
+          const m = Math.floor(remaining / 60);
+          const s = remaining % 60;
+          digits.innerText = String(m).padStart(2, '0') + ":" + String(s).padStart(2, '0');
+          digits.style.color = "#10B981";
+          sub.innerText = "Ticking live (" + remaining + "s remaining) ⏱️";
+        }}
+
+        tick();
+        if (active) {{
+          setInterval(() => {{
+            remaining--;
+            tick();
+          }}, 1000);
+        }}
+      </script>
+    </body>
+    </html>
+    """
+    components.html(html_code, height=90)
+
 
 def is_bot_running() -> bool:
     if not PID_FILE.exists():
@@ -149,13 +275,17 @@ with st.sidebar:
 
     if bot_running:
         st.markdown('<div><span class="pulse-green"></span><b>BOT STATUS: ACTIVE & RUNNING</b></div>', unsafe_allow_html=True)
-        if hb:
-            sec = hb.get("seconds_remaining", 0)
-            m = sec // 60
-            s = sec % 60
-            st.info(f"⏱️ **Next Scan:** {m}m {s:02d}s | Cycle #{hb.get('cycle_count', 0)}")
-        else:
-            st.success("Bot engine active. Starting next scan cycle...")
+        sec_sb = 300
+        if hb and "next_cycle_time" in hb:
+            try:
+                nxt = datetime.strptime(hb["next_cycle_time"], "%Y-%m-%d %H:%M:%S")
+                sec_sb = max(0, int((nxt - datetime.now()).total_seconds()))
+            except Exception:
+                sec_sb = hb.get("seconds_remaining", 300)
+        elif hb:
+            sec_sb = hb.get("seconds_remaining", 300)
+        render_live_countdown(sec_sb, bot_running, label="Next Scan Countdown")
+
         if st.button("🛑 STOP BOT", use_container_width=True, type="secondary"):
             stop_bot_process()
             st.rerun()
@@ -253,15 +383,19 @@ with tab_monitor:
             st.metric("Bot Status", "STOPPED", "Idle 🛑")
 
     with c_m2:
+        sec_tab = 300
         if bot_running and hb_data:
-            sec_left = hb_data.get("seconds_remaining", 0)
-            m_left = sec_left // 60
-            s_left = sec_left % 60
-            st.metric("Next Scan In", f"{m_left}m {s_left:02d}s", "Ticking countdown ⏱️")
-        elif bot_running:
-            st.metric("Next Scan In", "Scanning Now...", "Active ⚡")
-        else:
-            st.metric("Next Scan In", "Paused", "Start bot to begin")
+            if "next_cycle_time" in hb_data:
+                try:
+                    nxt = datetime.strptime(hb_data["next_cycle_time"], "%Y-%m-%d %H:%M:%S")
+                    sec_tab = max(0, int((nxt - datetime.now()).total_seconds()))
+                except Exception:
+                    sec_tab = hb_data.get("seconds_remaining", 300)
+            else:
+                sec_tab = hb_data.get("seconds_remaining", 300)
+        elif hb_data:
+            sec_tab = hb_data.get("seconds_remaining", 300)
+        render_live_countdown(sec_tab, bot_running, label="Next Market Scan In")
 
     with c_m3:
         cyc = hb_data.get("cycle_count", 0) if hb_data else 0

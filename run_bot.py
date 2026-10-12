@@ -286,6 +286,21 @@ def run_cycle(cycle_num: int = 1) -> int:
         })
 
     update_scanner_matrix(scanner_matrix_rows)
+    now = datetime.now()
+    from datetime import timedelta
+    next_s = now + timedelta(seconds=300)
+    update_heartbeat(
+        status="Cycle complete",
+        cycle_count=cycle_num,
+        last_cycle_time=now.strftime("%Y-%m-%d %H:%M:%S"),
+        next_cycle_time=next_s.strftime("%Y-%m-%d %H:%M:%S"),
+        seconds_remaining=300,
+        scanned_count=scanned_count,
+        active_positions=len(open_positions),
+        balance=balance,
+        equity=equity,
+        timeframe=timeframe
+    )
     append_live_log(f"✅ Cycle #{cycle_num} finished. {scanned_count} active symbols analyzed. 0 errors.")
     return scanned_count
 
