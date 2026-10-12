@@ -78,3 +78,31 @@ class TelegramNotifier:
             f"━━━━━━━━━━━━━━━━━━"
         )
         self.send_message(msg)
+
+    def notify_trade_closed(
+        self,
+        symbol: str,
+        direction: str,
+        lots: float,
+        entry_price: float,
+        exit_price: float,
+        profit_usd: float,
+        exit_reason: str,
+        analysis_explanation: str
+    ):
+        pnl_emoji = "🟢" if profit_usd >= 0 else "🔴"
+        pnl_label = "PROFIT" if profit_usd >= 0 else "LOSS"
+        msg = (
+            f"{pnl_emoji} *TRADE CLOSED REPORT: {symbol}*\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"📊 *Result:* {pnl_emoji} *{pnl_label} of ${profit_usd:+,.2f}*\n"
+            f"📈 *Direction:* {direction} ({lots:.2f} lots)\n"
+            f"💰 *Entry Price:* `{entry_price:.5f}`\n"
+            f"🏁 *Exit Price:* `{exit_price:.5f}`\n"
+            f"🛑 *Exit Trigger:* `{exit_reason}`\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"🧠 *Post-Trade Analysis & Why:*\n"
+            f"{analysis_explanation}\n"
+            f"━━━━━━━━━━━━━━━━━━"
+        )
+        self.send_message(msg)

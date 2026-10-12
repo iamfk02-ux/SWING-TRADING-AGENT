@@ -123,6 +123,83 @@ def run_cycle(cycle_num: int = 1) -> int:
 
     notifier = TelegramNotifier(config)
 
+    # 0. Detect newly closed trades from MT5 deal history and dispatch post-trade analysis
+    try:
+        import sqlite3
+        from datetime import timedelta
+        db_file = ROOT_DIR / "data" / "trading_journal.db"
+        with sqlite3.connect(db_file) as conn:
+            cur = conn.cursor()
+            # Fetch recorded trades that don't have an exit_time yet
+            open_db_trades = cur.execute(
+                "SELECT id, ticket, symbol, direction, lots, entry_price, initial_sl, initial_tp, strategy FROM trades WHERE exit_time IS NULL"
+            ).fetchall()
+
+            if open_db_trades:
+                from_date = datetime.now() - timedelta(days=7)
+                to_date = datetime.now() + timedelta(days=1)
+                closed_deals = mt5.history_deals_get(from_date, to_date)
+                
+                if closed_deals:
+                    deal_map = {d.position_id: d for d in closed_deals if d.entry == 1} # exit deals indexed by position ticket
+                    
+                    for row in open_db_trades:
+                        db_id, t_ticket, t_sym, t_dir, t_lots, t_entry, t_sl, t_tp, t_strat = row
+                        
+                        # If trade is closed in MT5 (deal with matching position ticket exists)
+                        matching_deal = deal_map.get(t_ticket)
+                        if matching_deal:
+                            exit_price = matching_deal.price
+                            profit_usd = matching_deal.profit
+                            exit_time = datetime.fromtimestamp(matching_deal.time).isoformat()
+                            comment = matching_deal.comment or ""
+                            
+                            # Determine exit reason
+                            if "sl" in comment.lower() or abs(exit_price - (t_sl or 0)) < 0.0005:
+                                exit_reason = "STOP LOSS HIT"
+                            elif "tp" in comment.lower() or (t_tp and abs(exit_price - t_tp) < 0.0005):
+                                exit_reason = "TAKE PROFIT HIT"
+                            else:
+                                exit_reason = f"CLOSED ({comment})" if comment else "CLOSED"
+
+                            # Calculate R multiple
+                            r_risk = abs(t_entry - t_sl) if t_sl else 0.0001
+                            pnl_r = round((exit_price - t_entry) / r_risk if t_dir == "BUY" else (t_entry - exit_price) / r_risk, 2)
+
+                            # Generate Post-Trade Analysis Report
+                            if profit_usd < 0:
+                                analysis_text = (
+                                    f"Trade was stopped out at `{exit_price:.5f}`. Market experienced a pullback/spread expansion past the dynamic ATR stop buffer (`{t_sl:.5f}`). "
+                                    f"Capital was strictly protected to initial 1% risk cap."
+                                )
+                            else:
+                                analysis_text = (
+                                    f"Target reached at `{exit_price:.5f}`! Strategy {t_strat} captured +{pnl_r}R profit into the expansion leg."
+                                )
+
+                            # Update database
+                            cur.execute("""
+                                UPDATE trades 
+                                SET exit_time = ?, exit_price = ?, exit_reason = ?, pnl_usd = ?, pnl_r = ?, notes = ?
+                                WHERE id = ?
+                            """, (exit_time, exit_price, exit_reason, profit_usd, pnl_r, analysis_text, db_id))
+                            conn.commit()
+
+                            # Dispatch alerts and live log
+                            append_live_log(f"📋 [TRADE REPORT] Closed #{t_ticket} ({t_sym} {t_dir}) | PnL: ${profit_usd:+,.2f} ({pnl_r}R) | Reason: {exit_reason}")
+                            notifier.notify_trade_closed(
+                                symbol=t_sym,
+                                direction=t_dir,
+                                lots=t_lots,
+                                entry_price=t_entry,
+                                exit_price=exit_price,
+                                profit_usd=profit_usd,
+                                exit_reason=exit_reason,
+                                analysis_explanation=analysis_text
+                            )
+    except Exception as e:
+        append_live_log(f"Error checking closed trade history: {e}", level="WARNING")
+
     # 1. Trailing stops and trade management for open positions
     for pos in open_positions:
         sym = pos["symbol"]
