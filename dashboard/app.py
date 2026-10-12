@@ -19,9 +19,15 @@ import subprocess
 import os
 import sys
 
-DB_PATH = Path(__file__).resolve().parent.parent / "data" / "trading_journal.db"
-CONFIG_PATH = Path(__file__).resolve().parent.parent / "config" / "settings.yaml"
-PID_FILE = Path(__file__).resolve().parent.parent / "data" / "bot.pid"
+ROOT_DIR = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT_DIR))
+
+from core.bot_logger import get_live_logs, get_heartbeat, get_scanner_matrix, append_live_log
+
+DB_PATH = ROOT_DIR / "data" / "trading_journal.db"
+CONFIG_PATH = ROOT_DIR / "config" / "settings.yaml"
+PID_FILE = ROOT_DIR / "data" / "bot.pid"
+LOG_FILE = ROOT_DIR / "data" / "bot_live.log"
 
 st.set_page_config(
     page_title="Trading Bot - Control Center",
@@ -93,7 +99,6 @@ def is_bot_running() -> bool:
                 return True
             return False
         else:
-            # Linux / Streamlit Community Cloud
             os.kill(pid, 0)
             return True
     except Exception:
@@ -101,18 +106,20 @@ def is_bot_running() -> bool:
 
 
 def start_bot_process():
-    root_dir = Path(__file__).resolve().parent.parent
+    root_dir = ROOT_DIR
     runner_script = root_dir / "run_bot.py"
-    # Launch detached background process
+    LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    f = open(LOG_FILE, "a", encoding="utf-8")
     proc = subprocess.Popen(
         [sys.executable, str(runner_script)],
         cwd=str(root_dir),
         creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == 'nt' else 0,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL
+        stdout=f,
+        stderr=f
     )
     PID_FILE.parent.mkdir(parents=True, exist_ok=True)
     PID_FILE.write_text(str(proc.pid))
+    append_live_log(f"🚀 Bot background engine launched (Process #{proc.pid}). Live scanning online.")
 
 
 def stop_bot_process():
@@ -126,6 +133,7 @@ def stop_bot_process():
         finally:
             if PID_FILE.exists():
                 PID_FILE.unlink()
+        append_live_log("🛑 Bot background engine stopped by user.")
 
 
 # -------------------------------------------------------------
@@ -137,9 +145,17 @@ with st.sidebar:
     st.title("🎛️ Master Control")
     st.markdown("---")
 
+    hb = get_heartbeat()
+
     if bot_running:
         st.markdown('<div><span class="pulse-green"></span><b>BOT STATUS: ACTIVE & RUNNING</b></div>', unsafe_allow_html=True)
-        st.success("The bot is continuously monitoring market cycles in the background.")
+        if hb:
+            sec = hb.get("seconds_remaining", 0)
+            m = sec // 60
+            s = sec % 60
+            st.info(f"⏱️ **Next Scan:** {m}m {s:02d}s | Cycle #{hb.get('cycle_count', 0)}")
+        else:
+            st.success("Bot engine active. Starting next scan cycle...")
         if st.button("🛑 STOP BOT", use_container_width=True, type="secondary"):
             stop_bot_process()
             st.rerun()
@@ -148,6 +164,16 @@ with st.sidebar:
         st.warning("The bot is currently idle.")
         if st.button("🚀 START BOT", use_container_width=True, type="primary"):
             start_bot_process()
+            st.rerun()
+
+    st.markdown("---")
+    st.subheader("⚡ Instant Market Audit")
+    if st.button("▶️ Run 1 Instant Scan Now", use_container_width=True):
+        with st.spinner("Scanning all pairs right now..."):
+            from run_bot import run_cycle
+            scanned = run_cycle(cycle_num=999)
+            st.success(f"Scanned {scanned} pairs!")
+            time.sleep(1)
             st.rerun()
 
     st.markdown("---")
@@ -206,9 +232,89 @@ st.markdown("---")
 # -------------------------------------------------------------
 # TABS
 # -------------------------------------------------------------
-tab_positions, tab_news, tab_signals, tab_backtest = st.tabs([
-    "📈 Active Trades", "📰 Human News Desk", "📋 Decision Log", "🧪 Strategy Backtester"
+tab_monitor, tab_positions, tab_news, tab_signals, tab_backtest = st.tabs([
+    "🔴 Live Market Scanner & Feed", "📈 Open Positions", "📰 Human News Desk", "📋 Decision Log", "🧪 Strategy Backtester"
 ])
+
+# TAB 1: LIVE MONITOR & FEED
+with tab_monitor:
+    st.subheader("🔴 Live Market Scanner & Real-Time Bot Feed")
+    st.write("Monitor exactly what the bot is evaluating, its countdown timer, and live activity feed.")
+
+    hb_data = get_heartbeat()
+
+    # 1. Live Heartbeat Metrics
+    c_m1, c_m2, c_m3, c_m4 = st.columns(4)
+    with c_m1:
+        if bot_running:
+            pid_val = PID_FILE.read_text().strip() if PID_FILE.exists() else ""
+            st.metric("Bot Status", "ACTIVE & SCANNING", f"Process #{pid_val} 🟢")
+        else:
+            st.metric("Bot Status", "STOPPED", "Idle 🛑")
+
+    with c_m2:
+        if bot_running and hb_data:
+            sec_left = hb_data.get("seconds_remaining", 0)
+            m_left = sec_left // 60
+            s_left = sec_left % 60
+            st.metric("Next Scan In", f"{m_left}m {s_left:02d}s", "Ticking countdown ⏱️")
+        elif bot_running:
+            st.metric("Next Scan In", "Scanning Now...", "Active ⚡")
+        else:
+            st.metric("Next Scan In", "Paused", "Start bot to begin")
+
+    with c_m3:
+        cyc = hb_data.get("cycle_count", 0) if hb_data else 0
+        last_t = hb_data.get("last_cycle_time", "N/A").split(" ")[-1] if hb_data else "N/A"
+        st.metric("Latest Cycle", f"Cycle #{cyc}", f"Finished at {last_t}")
+
+    with c_m4:
+        tf_val = hb_data.get("timeframe", "H1") if hb_data else "H1"
+        st.metric("Monitored Timeframe", f"{tf_val} (1-Hour)", "Intraday Pullback Triggers")
+
+    col_audit_btn, col_audit_txt = st.columns([1, 2.5])
+    with col_audit_btn:
+        if st.button("⚡ Trigger Immediate Market Scan", type="primary", use_container_width=True):
+            with st.spinner("Analyzing all pairs across the market right now..."):
+                from run_bot import run_cycle
+                done_scanned = run_cycle(cycle_num=999)
+                st.success(f"Audit complete! Analyzed {done_scanned} pairs.")
+                time.sleep(1)
+                st.rerun()
+    with col_audit_txt:
+        st.caption("You don't have to wait for the 5-minute timer. Click above to make the bot evaluate all pairs immediately.")
+
+    st.markdown("---")
+
+    # 2. Live Scanner Matrix
+    st.markdown("#### 🔍 Real-Time Pair Inspection Matrix")
+    st.caption("Here is what the bot is evaluating for every watched pair right now:")
+
+    mat = get_scanner_matrix()
+    if mat and mat.get("pairs"):
+        pairs_data = mat["pairs"]
+        df_mat = pd.DataFrame(pairs_data)
+        df_mat_clean = df_mat[["symbol", "price", "regime", "badge", "details", "last_checked"]].copy()
+        df_mat_clean.columns = ["Symbol", "Live Price", "D1 Macro Regime", "Status", "What the Bot is Seeing / Waiting For", "Time Checked"]
+        st.dataframe(df_mat_clean, use_container_width=True, hide_index=True)
+    else:
+        st.info("No scanner snapshot recorded yet. Click '⚡ Trigger Immediate Market Scan' or start the bot to view live pair inspections.")
+
+    st.markdown("---")
+
+    # 3. Live Console Terminal Stream
+    c_hdr, c_clr = st.columns([3, 1])
+    with c_hdr:
+        st.markdown("#### 📟 Live Console Activity Stream")
+        st.caption("Real-time terminal logs streaming directly from the bot engine:")
+    with c_clr:
+        if st.button("🗑️ Clear Log Feed"):
+            if LOG_FILE.exists():
+                LOG_FILE.write_text("")
+            st.rerun()
+
+    terminal_logs = get_live_logs(limit=80)
+    st.text_area("Terminal Output", value=terminal_logs, height=280, disabled=True, label_visibility="collapsed")
 
 # TAB 1: ACTIVE TRADES
 with tab_positions:

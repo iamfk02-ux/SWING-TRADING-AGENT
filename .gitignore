@@ -11,6 +11,9 @@ ENV/
 data/*.db
 data/*.sqlite3
 data/*.pid
+data/*.log
+data/*.json
+data/*.tmp
 data/history/*.csv
 
 # Personal MT5 / Telegram credentials

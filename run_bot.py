@@ -66,7 +66,14 @@ def resolve_mt5_symbol(symbol: str) -> Optional[str]:
     return None
 
 
-def run_cycle():
+from core.bot_logger import append_live_log, update_heartbeat, update_scanner_matrix
+
+
+def run_cycle(cycle_num: int = 1) -> int:
+    """
+    Executes a single market scan cycle across all enabled pairs with real-time logging.
+    Returns the number of scanned symbols.
+    """
     config_path = ROOT_DIR / "config" / "settings.yaml"
     with open(config_path, "r") as f:
         config = yaml.safe_load(f)
@@ -75,20 +82,20 @@ def run_cycle():
 
     exec_agent = ExecutionAgent(config)
     if not exec_agent.connect():
-        print("[BOT ERROR] Unable to connect to MetaTrader 5.")
-        return
+        append_live_log("Unable to connect to MetaTrader 5 terminal. Check that MT5 is running.", level="ERROR")
+        return 0
 
     acct = mt5.account_info()
     if acct is None:
-        print("[BOT ERROR] Unable to read account info from MT5.")
-        return
+        append_live_log("Unable to read account credentials from active MT5 terminal.", level="ERROR")
+        return 0
 
     equity = acct.equity
     balance = acct.balance
     timeframe = config.get("data", {}).get("timeframe", "H1").upper()
 
-    print(f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] --- CYCLE START ({timeframe} CANDLES) ---")
-    print(f"Account: #{acct.login} | Server: {acct.server} | Balance: ${balance:.2f} | Equity: ${equity:.2f}")
+    append_live_log(f"--- 🔄 SCAN CYCLE #{cycle_num} INITIATED ({timeframe} CANDLES) ---")
+    append_live_log(f"MT5 Account #{acct.login} ({acct.server}) | Balance: ${balance:,.2f} | Equity: ${equity:,.2f}")
 
     data_agent = DataAgent(config)
     regime_agent = MarketRegimeAgent(config)
@@ -99,20 +106,20 @@ def run_cycle():
     risk_manager = RiskManager(config)
 
     # Weekend vs Weekday portfolio selection
-    is_weekend = datetime.utcnow().weekday() in (5, 6)  # Saturday=5, Sunday=6
+    is_weekend = datetime.utcnow().weekday() in (5, 6)
     forex_syms = config.get("symbols", {}).get("forex", [])
     metal_syms = config.get("symbols", {}).get("metals", [])
     crypto_syms = config.get("symbols", {}).get("crypto", [])
 
     if is_weekend:
         symbols_to_scan = crypto_syms
-        print(f"[WEEKEND MODE] Forex & Metals markets closed. Crypto 24/7 scanning active ({', '.join(crypto_syms)}).")
+        append_live_log(f"🕒 Weekend Mode Active: Traditional Forex/Metals markets closed. Scanning Crypto 24/7 ({', '.join(crypto_syms)}).")
     else:
         symbols_to_scan = forex_syms + metal_syms + crypto_syms
-        print(f"[WEEKDAY MODE] Full universe active: {len(symbols_to_scan)} symbols (Forex + Metals + Crypto).")
+        append_live_log(f"🟢 Weekday Active: Full portfolio universe active ({len(symbols_to_scan)} symbols across Forex, Metals, Crypto).")
 
     open_positions = exec_agent.get_open_positions()
-    print(f"Active MT5 Positions: {len(open_positions)}")
+    append_live_log(f"Active MT5 Positions: {len(open_positions)}")
 
     notifier = TelegramNotifier(config)
 
@@ -133,7 +140,7 @@ def run_cycle():
                     if profit_dist > (1.5 * d1_atr) and sl < entry:
                         new_sl = entry + (0.1 * d1_atr)
                         exec_agent.modify_stop_loss(pos["ticket"], new_sl)
-                        print(f"[MANAGEMENT] {sym} Stop Loss moved to Break-Even at {new_sl:.5f}")
+                        append_live_log(f"🎯 [MANAGEMENT] {sym} Stop Loss moved to Break-Even at {new_sl:.5f}")
                         notifier.notify_breakeven(sym, new_sl)
 
                 elif pos["direction"] == "SELL":
@@ -141,15 +148,16 @@ def run_cycle():
                     if profit_dist > (1.5 * d1_atr) and (sl > entry or sl == 0):
                         new_sl = entry - (0.1 * d1_atr)
                         exec_agent.modify_stop_loss(pos["ticket"], new_sl)
-                        print(f"[MANAGEMENT] {sym} Stop Loss moved to Break-Even at {new_sl:.5f}")
+                        append_live_log(f"🎯 [MANAGEMENT] {sym} Stop Loss moved to Break-Even at {new_sl:.5f}")
                         notifier.notify_breakeven(sym, new_sl)
 
     # 2. Scan market for new signals across all 3 strategy agents
     scanned_count = 0
+    scanner_matrix_rows = []
+
     for raw_sym in symbols_to_scan:
         actual_sym = resolve_mt5_symbol(raw_sym)
         if not actual_sym:
-            # Symbol not present on current broker
             continue
 
         df_d1, df_lower = data_agent.get_bars(actual_sym, timeframe=timeframe)
@@ -159,24 +167,80 @@ def run_cycle():
         scanned_count += 1
         d1_regimes = regime_agent.calculate_regime_series(df_d1)
         current_regime = d1_regimes.iloc[-1]
+        curr_price = float(df_lower["close"].iloc[-1])
+        pip_size = 0.01 if "JPY" in actual_sym else (0.1 if "XAU" in actual_sym else 0.0001)
+
+        # Human-readable diagnostics
+        status_text = ""
+        action_badge = "WATCHING"
+
+        if current_regime in ["TRENDING_UP", "TRENDING_DOWN"]:
+            from core.indicators import compute_ema
+            h1_ema_fast = float(compute_ema(df_lower["close"], 20).iloc[-1])
+            pips_diff = abs(curr_price - h1_ema_fast) / pip_size
+            direction_word = "above" if curr_price > h1_ema_fast else "below"
+            pullback_window = df_lower.iloc[-10:-1]
+            
+            if current_regime == "TRENDING_UP":
+                touched = (pullback_window["low"] <= compute_ema(df_lower["close"], 20).iloc[-10:-1]).any()
+                if touched:
+                    status_text = f"Pullback to EMA20 occurred! Watching for bullish candle trigger close."
+                    action_badge = "PULLBACK DETECTED"
+                else:
+                    status_text = f"Uptrend active. Price is +{pips_diff:.1f} pips {direction_word} EMA20 ({h1_ema_fast:.5f}). Waiting for pullback."
+                    action_badge = "WAITING PULLBACK"
+            else:
+                touched = (pullback_window["high"] >= compute_ema(df_lower["close"], 20).iloc[-10:-1]).any()
+                if touched:
+                    status_text = f"Pullback to EMA20 occurred! Watching for bearish candle trigger close."
+                    action_badge = "PULLBACK DETECTED"
+                else:
+                    status_text = f"Downtrend active. Price is -{pips_diff:.1f} pips {direction_word} EMA20 ({h1_ema_fast:.5f}). Waiting for pullback."
+                    action_badge = "WAITING PULLBACK"
+
+        elif current_regime == "RANGING":
+            from core.indicators import compute_rsi, compute_bollinger_bands
+            rsi_val = float(compute_rsi(df_d1["close"], 14).iloc[-1])
+            bb = compute_bollinger_bands(df_d1["close"], 20, 2.0)
+            bb_low = float(bb["bb_lower"].iloc[-1])
+            bb_high = float(bb["bb_upper"].iloc[-1])
+            status_text = f"Ranging market. RSI: {rsi_val:.1f} (Looking for <35 at {bb_low:.5f} or >65 at {bb_high:.5f})."
+            action_badge = "RANGE FADE"
+
+        elif current_regime == "COMPRESSION":
+            from core.indicators import compute_donchian
+            donch = compute_donchian(df_d1, 20)
+            d_high = float(donch["donchian_high"].iloc[-1])
+            d_low = float(donch["donchian_low"].iloc[-1])
+            status_text = f"Volatility Squeeze. Watching for breakout close above {d_high:.5f} or below {d_low:.5f}."
+            action_badge = "SQUEEZE BREAKOUT"
+
+        else:
+            status_text = f"Consolidation / Unclear macro regime. Standing aside to protect capital."
+            action_badge = "IDLE (PROTECTING)"
+
+        append_live_log(f"🔍 [{actual_sym}] {current_regime} | Price: {curr_price:.5f} ➔ {status_text}")
 
         # Collect candidate signals from each agent
         candidate_signals = []
         
-        # 1. Trend Agent (D1 Regime + Lower Timeframe Pullback Trigger)
+        # 1. Trend Agent
         s_trend = trend_agent.scan_for_signal(actual_sym, df_d1, df_lower, current_regime)
         if s_trend: candidate_signals.append(s_trend)
 
-        # 2. Breakout Agent (D1 Volatility Squeeze Breakout)
+        # 2. Breakout Agent
         s_break = breakout_agent.scan_for_signal(actual_sym, df_d1, current_regime)
         if s_break: candidate_signals.append(s_break)
 
-        # 3. Mean-Reversion Agent (D1 Ranging Extremes + Lower Timeframe Fade Trigger)
+        # 3. Mean-Reversion Agent
         s_mr = mean_rev_agent.scan_for_signal(actual_sym, df_d1, df_lower, current_regime)
         if s_mr: candidate_signals.append(s_mr)
 
         for signal in candidate_signals:
+            action_badge = "🔥 SETUP FOUND"
             score = scorer.score_signal(signal)
+            append_live_log(f"⚡ [{actual_sym}] SETUP DETECTED! Strategy: {signal['strategy']} {signal['direction']} | Confluence Score: {score:.2f}")
+
             if scorer.is_eligible(score):
                 approved, reason, lots = risk_manager.evaluate_order(
                     signal, equity, balance, open_positions
@@ -186,7 +250,8 @@ def run_cycle():
                 log_signal(signal)
 
                 if approved:
-                    print(f"[SIGNAL ACCEPTED] {actual_sym} {signal['strategy']} {signal['direction']} - Score: {score:.2f} | Lots: {lots}")
+                    action_badge = "🚀 ORDER PLACED"
+                    append_live_log(f"✅ [{actual_sym}] RISK APPROVED! Placing {lots} lots | SL: {signal['stop_loss']:.5f} | TP: {signal.get('take_profit') or 'Trailing'}")
                     ticket = exec_agent.place_order(
                         symbol=actual_sym,
                         direction=signal["direction"],
@@ -196,6 +261,7 @@ def run_cycle():
                         strategy_name=signal["strategy"]
                     )
                     if ticket:
+                        append_live_log(f"🎉 [{actual_sym}] Live Order Placed in MT5! Order Ticket #{ticket}")
                         notifier.notify_trade_opened(
                             symbol=actual_sym,
                             direction=signal["direction"],
@@ -207,9 +273,21 @@ def run_cycle():
                             score=score
                         )
                 else:
-                    print(f"[RISK REJECTED] {actual_sym} {signal['strategy']} {signal['direction']} - Reason: {reason}")
+                    action_badge = "⚠️ RISK REJECTED"
+                    append_live_log(f"⚠️ [{actual_sym}] Trade Rejected by Risk Manager: {reason}")
 
-    print(f"Cycle finished: {scanned_count} active symbols analyzed on {timeframe} candles.")
+        scanner_matrix_rows.append({
+            "symbol": actual_sym,
+            "price": curr_price,
+            "regime": current_regime,
+            "badge": action_badge,
+            "details": status_text,
+            "last_checked": datetime.now().strftime("%H:%M:%S")
+        })
+
+    update_scanner_matrix(scanner_matrix_rows)
+    append_live_log(f"✅ Cycle #{cycle_num} finished. {scanned_count} active symbols analyzed. 0 errors.")
+    return scanned_count
 
 
 def main():
@@ -223,26 +301,57 @@ def main():
         config = yaml.safe_load(f)
     timeframe = config.get("data", {}).get("timeframe", "H1").upper()
 
-    print("=" * 65)
-    print("    SWING MULTI-AGENT TRADING BOT - LIVE ENGINE ACTIVE")
-    print("=" * 65)
-    print("Connected to live MetaTrader 5 Terminal.")
-    print(f"Scanning frequency: {timeframe} candles (Intraday Pullback Triggers)")
-    print("Crypto Weekend Trading: ENABLED (24/7/365)")
-    print("Scanning cycle running every 5 minutes...")
-    print("Press Ctrl+C in this window at any time to halt the bot.")
+    append_live_log("=" * 65)
+    append_live_log("    SWING MULTI-AGENT TRADING BOT - LIVE ENGINE ONLINE")
+    append_live_log("=" * 65)
+    append_live_log(f"Active Timeframe: {timeframe} Candles (Lower Timeframe Scanning)")
+    append_live_log("Crypto Weekend Trading: ENABLED (24/7/365)")
+    append_live_log("Cycle Interval: 5 Minutes (300 seconds)")
 
+    cycle_count = 0
     try:
         while True:
+            cycle_count += 1
             try:
-                run_cycle()
+                scanned = run_cycle(cycle_count)
             except Exception as e:
-                print(f"[ERROR IN CYCLE] {e}")
+                append_live_log(f"Error in cycle #{cycle_count}: {e}", level="ERROR")
+                scanned = 0
 
-            time.sleep(300)
+            # Countdown sleep loop (updates heartbeat every 5 seconds)
+            scan_finish = datetime.now()
+            from datetime import timedelta
+            next_scan = scan_finish + timedelta(seconds=300)
+            
+            append_live_log(f"💤 Bot sleeping. Next scan in 5m 00s (at {next_scan.strftime('%H:%M:%S')})...")
+
+            while datetime.now() < next_scan:
+                if not pid_file.exists():
+                    append_live_log("PID file removed. Halting bot cleanly.")
+                    return
+
+                sec_left = int((next_scan - datetime.now()).total_seconds())
+                mins = sec_left // 60
+                secs = sec_left % 60
+
+                update_heartbeat(
+                    status=f"Sleeping until next candle (Next scan in {mins}m {secs:02d}s)",
+                    cycle_count=cycle_count,
+                    last_cycle_time=scan_finish.strftime("%Y-%m-%d %H:%M:%S"),
+                    next_cycle_time=next_scan.strftime("%Y-%m-%d %H:%M:%S"),
+                    seconds_remaining=sec_left,
+                    scanned_count=scanned,
+                    active_positions=0,
+                    balance=100000.0,
+                    equity=100000.0,
+                    timeframe=timeframe
+                )
+                time.sleep(5)
+
     finally:
         if pid_file.exists():
             pid_file.unlink()
+        append_live_log("Bot engine terminated.")
 
 
 if __name__ == "__main__":
