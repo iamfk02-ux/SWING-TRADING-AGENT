@@ -346,10 +346,14 @@ else:
 try:
     import MetaTrader5 as mt5
     mt5_active = mt5.initialize()
+    if not mt5_active:
+        time.sleep(0.5)
+        mt5_active = mt5.initialize()
 except Exception:
     mt5_active = False
 
 col1, col2, col3, col4 = st.columns(4)
+hb = get_heartbeat()
 if mt5_active:
     acct = mt5.account_info()
     if acct:
@@ -359,12 +363,23 @@ if mt5_active:
         profit_delta = f"{'+' if acct.profit >= 0 else ''}${acct.profit:,.2f}"
         col4.metric("Floating P&L", f"${acct.profit:,.2f}", profit_delta)
     else:
-        st.warning("MT5 terminal detected, but could not read account info.")
+        # Fallback to heartbeat metrics recorded by bot
+        col1.metric("MT5 Account", f"#{hb.get('login', 'Active')}", "Syncing 🔄")
+        col2.metric("Account Balance", f"${hb.get('balance', 0):,.2f}")
+        col3.metric("Live Equity", f"${hb.get('equity', 0):,.2f}")
+        col4.metric("Floating P&L", "$0.00")
 else:
-    col1.error("MT5 Terminal: Disconnected")
-    col2.metric("Account Balance", "$0.00")
-    col3.metric("Live Equity", "$0.00")
-    col4.metric("Floating P&L", "$0.00")
+    # If terminal IPC briefly flickered, check if bot engine is active
+    if hb and hb.get("balance", 0) > 0:
+        col1.warning("MT5 Reconnecting... 🔄")
+        col2.metric("Account Balance", f"${hb.get('balance', 0):,.2f}")
+        col3.metric("Live Equity", f"${hb.get('equity', 0):,.2f}")
+        col4.metric("Floating P&L", "$0.00")
+    else:
+        col1.error("MT5 Terminal: Disconnected")
+        col2.metric("Account Balance", "$0.00")
+        col3.metric("Live Equity", "$0.00")
+        col4.metric("Floating P&L", "$0.00")
 
 st.markdown("---")
 
