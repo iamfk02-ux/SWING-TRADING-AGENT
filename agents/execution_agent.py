@@ -138,6 +138,10 @@ class ExecutionAgent:
 
     def modify_stop_loss(self, ticket: int, new_sl: float) -> bool:
         """Modifies the stop loss of an open position in MT5."""
+        return self.modify_sltp(ticket=ticket, new_sl=new_sl)
+
+    def modify_sltp(self, ticket: int, new_sl: Optional[float] = None, new_tp: Optional[float] = None) -> bool:
+        """Modifies stop loss and/or take profit of an open position in MT5."""
         if not self.is_connected and not self.connect():
             return False
 
@@ -150,11 +154,60 @@ class ExecutionAgent:
             "action": mt5.TRADE_ACTION_SLTP,
             "position": ticket,
             "symbol": pos.symbol,
-            "sl": float(new_sl),
-            "tp": pos.tp
+            "sl": float(new_sl) if new_sl is not None else float(pos.sl),
+            "tp": float(new_tp) if new_tp is not None else float(pos.tp)
         }
         res = mt5.order_send(request)
         return res is not None and res.retcode == mt5.TRADE_RETCODE_DONE
+
+    def close_partial_position(self, ticket: int, lots_to_close: float) -> bool:
+        """Closes a partial volume of an open position in MT5 (e.g. 50% partial take profit)."""
+        if not self.is_connected and not self.connect():
+            return False
+
+        position = mt5.positions_get(ticket=ticket)
+        if not position or len(position) == 0:
+            return False
+
+        pos = position[0]
+        sym = pos.symbol
+        tick = mt5.symbol_info_tick(sym)
+        if not tick:
+            return False
+
+        # Opposite order type to close
+        close_type = mt5.ORDER_TYPE_SELL if pos.type == mt5.ORDER_TYPE_BUY else mt5.ORDER_TYPE_BUY
+        price = tick.bid if pos.type == mt5.ORDER_TYPE_BUY else tick.ask
+
+        # Check volume step
+        info = mt5.symbol_info(sym)
+        lot_step = info.volume_step if (info and info.volume_step > 0) else 0.01
+        min_lot = info.volume_min if (info and info.volume_min > 0) else 0.01
+
+        vol = round(lots_to_close / lot_step) * lot_step
+        vol = round(max(min_lot, min(vol, pos.volume)), 2)
+
+        request = {
+            "action": mt5.TRADE_ACTION_DEAL,
+            "position": ticket,
+            "symbol": sym,
+            "volume": float(vol),
+            "type": close_type,
+            "price": float(price),
+            "deviation": 20,
+            "magic": 10102026,
+            "comment": "AGENT_PARTIAL_TP",
+            "type_time": mt5.ORDER_TIME_GTC,
+            "type_filling": mt5.ORDER_FILLING_IOC
+        }
+        res = mt5.order_send(request)
+        if res and res.retcode == mt5.TRADE_RETCODE_DONE:
+            print(f"[PARTIAL TP SUCCESS] Closed {vol} lots on #{ticket} ({sym}) @ {price:.5f}")
+            return True
+        else:
+            err = res.comment if res else mt5.last_error()
+            print(f"[PARTIAL TP FAILED] #{ticket}: {err}")
+            return False
 
     def get_open_positions(self) -> List[Dict[str, Any]]:
         """Returns all open MT5 positions placed by this agent."""

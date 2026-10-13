@@ -201,7 +201,7 @@ def run_cycle(cycle_num: int = 1) -> int:
     except Exception as e:
         append_live_log(f"Error checking closed trade history: {e}", level="WARNING")
 
-    # 1. Trailing stops and trade management for open positions
+    # 1. Partial Take Profit (50%) & Trailing Stops for open positions
     for pos in open_positions:
         sym = pos["symbol"]
         df_d1, df_lower = data_agent.get_bars(sym, timeframe=timeframe)
@@ -212,7 +212,28 @@ def run_cycle(cycle_num: int = 1) -> int:
                 current_price = tick.bid if pos["direction"] == "BUY" else tick.ask
                 entry = pos["entry_price"]
                 sl = pos["sl"]
+                tp = pos["tp"]
+                current_vol = pos["volume"]
 
+                # 1A. Partial Take Profit Trigger at 1.5R:
+                # If price reached TP level and volume is >= 0.02 lots, bank 50% profit & remove TP cap for trailing runner
+                if tp > 0 and current_vol >= 0.02:
+                    hit_tp = (pos["direction"] == "BUY" and current_price >= tp) or \
+                             (pos["direction"] == "SELL" and current_price <= tp)
+                    if hit_tp:
+                        half_vol = round(current_vol / 2.0, 2)
+                        pnl_usd = pos["profit"] * (half_vol / current_vol)
+                        success = exec_agent.close_partial_position(pos["ticket"], half_vol)
+                        if success:
+                            # Move SL to Break-Even (+0.1R cushion) and set TP to 0 (unlimited runner)
+                            be_sl = entry + (0.1 * d1_atr) if pos["direction"] == "BUY" else entry - (0.1 * d1_atr)
+                            exec_agent.modify_sltp(pos["ticket"], new_sl=be_sl, new_tp=0.0)
+                            rem_vol = round(current_vol - half_vol, 2)
+                            append_live_log(f"💰 [PARTIAL TP] {sym}: Banked +${pnl_usd:,.2f} on {half_vol} lots! Remaining {rem_vol} lots running risk-free with Trailing Stop.")
+                            notifier.notify_partial_tp(sym, half_vol, rem_vol, current_price, pnl_usd, be_sl)
+                            continue
+
+                # 1B. Standard Break-even if not already moved
                 if pos["direction"] == "BUY":
                     profit_dist = current_price - entry
                     if profit_dist > (1.5 * d1_atr) and sl < entry:

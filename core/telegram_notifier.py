@@ -69,6 +69,18 @@ class TelegramNotifier:
         )
         self.send_message(msg)
 
+    def notify_partial_tp(self, symbol: str, closed_lots: float, remaining_lots: float, price: float, profit_usd: float, new_sl: float):
+        msg = (
+            f"💰 *PARTIAL TAKE PROFIT HIT!*\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"📈 *Symbol:* `{symbol}`\n"
+            f"💵 *Cash Banked:* *+${profit_usd:,.2f}* (Closed {closed_lots:.2f} lots @ `{price:.5f}`)\n"
+            f"🛡️ *Stop-Loss:* Moved to *Break-Even* at `{new_sl:.5f}`\n"
+            f"🏃 *Runner Active:* `{remaining_lots:.2f} lots` running *100% risk-free* with trailing stop!\n"
+            f"━━━━━━━━━━━━━━━━━━"
+        )
+        self.send_message(msg)
+
     def notify_kill_switch(self, current_dd: float, threshold: float):
         msg = (
             f"🚨 *KILL SWITCH TRIGGERED* 🚨\n"

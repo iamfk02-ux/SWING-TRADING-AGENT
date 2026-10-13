@@ -118,6 +118,10 @@ class TrendAgent:
             if limit_price >= curr_bar["close"]:
                 limit_price = round(curr_bar["close"] - 0.1 * atr_val, 5)
 
+            # Calculate 1.5R Target for Initial Partial Take Profit
+            r_dist = abs(limit_price - sl)
+            initial_tp = round(limit_price + (1.5 * r_dist), 5)
+
             return {
                 "symbol": symbol,
                 "strategy": "TREND",
@@ -126,7 +130,7 @@ class TrendAgent:
                 "entry": float(limit_price),
                 "market_price": float(curr_bar["close"]),
                 "stop_loss": float(sl),
-                "take_profit": None,  # Runner / Trailing
+                "take_profit": float(initial_tp),  # 1.5R Partial TP Target
                 "confidence": min(1.0, confidence),
                 "regime": current_regime,
                 "reason": f"D1 uptrend with {tf_name} EMA20 pullback: Buy Limit at discount {limit_price:.5f}",
@@ -177,6 +181,10 @@ class TrendAgent:
             if limit_price <= curr_bar["close"]:
                 limit_price = round(curr_bar["close"] + 0.1 * atr_val, 5)
 
+            # Calculate 1.5R Target for Initial Partial Take Profit
+            r_dist = abs(sl - limit_price)
+            initial_tp = round(limit_price - (1.5 * r_dist), 5)
+
             return {
                 "symbol": symbol,
                 "strategy": "TREND",
@@ -185,7 +193,7 @@ class TrendAgent:
                 "entry": float(limit_price),
                 "market_price": float(curr_bar["close"]),
                 "stop_loss": float(sl),
-                "take_profit": None,
+                "take_profit": float(initial_tp),  # 1.5R Partial TP Target
                 "confidence": min(1.0, confidence),
                 "regime": current_regime,
                 "reason": f"D1 downtrend with {tf_name} EMA20 pullback: Sell Limit at discount {limit_price:.5f}",
