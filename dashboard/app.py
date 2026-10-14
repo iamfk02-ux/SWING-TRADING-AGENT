@@ -516,7 +516,51 @@ with tab_positions:
         st.error("Please ensure your MetaTrader 5 terminal is open.")
 
     st.markdown("---")
-    with st.expander("ℹ️ How 1-Hour (H1) Scanning & 24/7 Crypto Weekend Trading Work", expanded=False):
+    # Closed Trades History & Realized Performance
+    st.subheader("🏁 Closed Trades History & Performance")
+    if DB_PATH.exists():
+        with sqlite3.connect(DB_PATH) as conn:
+            df_closed = pd.read_sql_query("""
+                SELECT 
+                    ticket AS 'Ticket',
+                    symbol AS 'Symbol',
+                    direction AS 'Type',
+                    lots AS 'Lots',
+                    entry_price AS 'Entry Price',
+                    exit_price AS 'Exit Price',
+                    exit_time AS 'Closed At',
+                    exit_reason AS 'Exit Trigger',
+                    pnl_usd AS 'Profit ($)',
+                    pnl_r AS 'Return (R)',
+                    notes AS 'Post-Trade Analysis'
+                FROM trades 
+                WHERE exit_time IS NOT NULL 
+                ORDER BY id DESC
+            """, conn)
+            
+            if not df_closed.empty:
+                # Summary metrics
+                total_pnl = df_closed["Profit ($)"].sum()
+                win_count = len(df_closed[df_closed["Profit ($)"] > 0])
+                loss_count = len(df_closed[df_closed["Profit ($)"] <= 0])
+                win_rate = (win_count / len(df_closed)) * 100.0 if len(df_closed) > 0 else 0.0
+
+                c_h1, c_h2, c_h3, c_h4 = st.columns(4)
+                c_h1.metric("Closed Trades", len(df_closed))
+                c_h2.metric("Net Realized Profit", f"${total_pnl:+,.2f}", f"{'+' if total_pnl >= 0 else ''}${total_pnl:,.2f}")
+                c_h3.metric("Win Rate", f"{win_rate:.1f}%", f"{win_count}W / {loss_count}L")
+                c_h4.metric("Avg Trade", f"${(total_pnl / len(df_closed)):+,.2f}")
+
+                # Format profit column for display
+                df_display = df_closed.copy()
+                df_display["Profit ($)"] = df_display["Profit ($)"].apply(lambda x: f"${x:+,.2f}" if pd.notnull(x) else "$0.00")
+                df_display["Return (R)"] = df_display["Return (R)"].apply(lambda x: f"{x:+.2f}R" if pd.notnull(x) else "-")
+                st.dataframe(df_display, use_container_width=True, hide_index=True)
+            else:
+                st.info("No closed trades recorded yet.")
+
+    st.markdown("---")
+    with st.expander("ℹ️ How 4-Hour (H4) Swing Scanning & Pending Orders Work", expanded=False):
         st.markdown("""
         ### ⚡ Faster Trade Opportunities with 1-Hour (H1) Scanning
         - **Why we added H1 scanning:** Waiting for 4-Hour (H4) or Daily setups can take days or even weeks.
