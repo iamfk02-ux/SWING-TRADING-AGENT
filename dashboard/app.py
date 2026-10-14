@@ -386,8 +386,13 @@ st.markdown("---")
 # -------------------------------------------------------------
 # TABS
 # -------------------------------------------------------------
-tab_monitor, tab_positions, tab_news, tab_signals, tab_backtest = st.tabs([
-    "🔴 Live Market Scanner & Feed", "📈 Open Positions", "📰 Human News Desk", "📋 Decision Log", "🧪 Strategy Backtester"
+tab_monitor, tab_positions, tab_history, tab_news, tab_signals, tab_backtest = st.tabs([
+    "🔴 Live Market Scanner & Feed", 
+    "📈 Open Positions", 
+    "🏁 Trade History (Closed P&L)", 
+    "📰 Human News Desk", 
+    "📋 Decision Log", 
+    "🧪 Strategy Backtester"
 ])
 
 # TAB 1: LIVE MONITOR & FEED
@@ -515,9 +520,11 @@ with tab_positions:
     else:
         st.error("Please ensure your MetaTrader 5 terminal is open.")
 
-    st.markdown("---")
-    # Closed Trades History & Realized Performance
-    st.subheader("🏁 Closed Trades History & Performance")
+# TAB 3: CLOSED TRADE HISTORY & REALIZED P&L
+with tab_history:
+    st.subheader("🏁 Closed Trades History & Realized Performance")
+    st.caption("Complete historical track record of all closed positions taken by the bot, showing realized profit/loss, return in R, and post-trade technical post-mortems.")
+
     if DB_PATH.exists():
         with sqlite3.connect(DB_PATH) as conn:
             df_closed = pd.read_sql_query("""
@@ -548,8 +555,11 @@ with tab_positions:
                 c_h1, c_h2, c_h3, c_h4 = st.columns(4)
                 c_h1.metric("Closed Trades", len(df_closed))
                 c_h2.metric("Net Realized Profit", f"${total_pnl:+,.2f}", f"{'+' if total_pnl >= 0 else ''}${total_pnl:,.2f}")
-                c_h3.metric("Win Rate", f"{win_rate:.1f}%", f"{win_count}W / {loss_count}L")
-                c_h4.metric("Avg Trade", f"${(total_pnl / len(df_closed)):+,.2f}")
+                c_h3.metric("Win Rate", f"{win_rate:.1f}%", f"{win_count} Wins / {loss_count} Losses")
+                c_h4.metric("Avg Trade P&L", f"${(total_pnl / len(df_closed)):+,.2f}")
+
+                st.markdown("---")
+                st.markdown("#### Detailed Trade Log")
 
                 # Format profit column for display
                 df_display = df_closed.copy()
