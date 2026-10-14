@@ -105,6 +105,11 @@ def run_cycle(cycle_num: int = 1) -> int:
     scorer = SignalScorer(config)
     risk_manager = RiskManager(config)
 
+    from agents.consensus_engine import ConsensusEngine
+    from core.circuit_breaker import CircuitBreaker
+    consensus_engine = ConsensusEngine(config)
+    circuit_breaker = CircuitBreaker(config)
+
     # Weekend vs Weekday portfolio selection
     is_weekend = datetime.utcnow().weekday() in (5, 6)
     forex_syms = config.get("symbols", {}).get("forex", [])
@@ -318,7 +323,11 @@ def run_cycle(cycle_num: int = 1) -> int:
             status_text = f"Consolidation / Unclear macro regime. Standing aside to protect capital."
             action_badge = "IDLE (PROTECTING)"
 
-        append_live_log(f"🔍 [{actual_sym}] {current_regime} | Price: {curr_price:.5f} ➔ {status_text}")
+        # Check Circuit Breaker before processing setups (Rule 11)
+        cb_tripped, cb_reason = circuit_breaker.is_tripped()
+        if cb_tripped:
+            append_live_log(f"⚠️ [{actual_sym}] {cb_reason}", level="WARNING")
+            continue
 
         # Collect candidate signals from each agent
         candidate_signals = []
@@ -335,52 +344,64 @@ def run_cycle(cycle_num: int = 1) -> int:
         s_mr = mean_rev_agent.scan_for_signal(actual_sym, df_d1, df_lower, current_regime)
         if s_mr: candidate_signals.append(s_mr)
 
-        for signal in candidate_signals:
-            action_badge = "🔥 SETUP FOUND"
-            score = scorer.score_signal(signal)
-            append_live_log(f"⚡ [{actual_sym}] SETUP DETECTED! Strategy: {signal['strategy']} {signal['direction']} | Confluence Score: {score:.2f}")
+        # Multi-Agent Consensus & Conflict Arbitration (Architecture Layer 4)
+        if candidate_signals:
+            winning_signal, audit_verdict = consensus_engine.arbitrate(actual_sym, candidate_signals)
+            append_live_log(f"🤝 [{actual_sym}] Consensus Audit: {audit_verdict}")
+            
+            if winning_signal:
+                signal = winning_signal
+                action_badge = "🔥 SETUP FOUND"
+                score = scorer.score_signal(signal)
+                append_live_log(f"⚡ [{actual_sym}] SETUP DETECTED! Strategy: {signal['strategy']} {signal['direction']} | Final Score: {score:.2f}")
 
-            if scorer.is_eligible(score):
-                approved, reason, lots = risk_manager.evaluate_order(
-                    signal, equity, balance, open_positions, pending_orders=pending_orders
-                )
-                signal["status"] = "APPROVED" if approved else "REJECTED_BY_RISK"
-                signal["rejection_reason"] = reason
-                log_signal(signal)
-
-                order_type_str = signal.get("order_type", "MARKET")
-                expiry_h = config.get("risk", {}).get("pending_order_expiry_hours", 24)
-
-                if approved:
-                    action_badge = "🚀 ORDER PLACED"
-                    target_entry_txt = f"{signal['entry']:.5f} ({order_type_str})" if order_type_str != "MARKET" else "Market"
-                    append_live_log(f"✅ [{actual_sym}] RISK APPROVED! Placing {order_type_str} {lots} lots @ {target_entry_txt} | SL: {signal['stop_loss']:.5f} | TP: {signal.get('take_profit') or 'Trailing'}")
-                    ticket = exec_agent.place_order(
-                        symbol=actual_sym,
-                        direction=signal["direction"],
-                        lots=lots,
-                        stop_loss=signal["stop_loss"],
-                        take_profit=signal.get("take_profit"),
-                        strategy_name=signal["strategy"],
-                        order_type_str=order_type_str,
-                        entry_price=signal.get("entry"),
-                        expiration_hours=expiry_h
+                if scorer.is_eligible(score):
+                    approved, reason, lots = risk_manager.evaluate_order(
+                        signal, equity, balance, open_positions, pending_orders=pending_orders
                     )
-                    if ticket:
-                        append_live_log(f"🎉 [{actual_sym}] Live {order_type_str} Order Placed in MT5! Ticket #{ticket} (Auto-exp: {expiry_h}h)")
-                        notifier.notify_trade_opened(
+                    signal["status"] = "APPROVED" if approved else "REJECTED_BY_RISK"
+                    signal["rejection_reason"] = reason
+                    log_signal(signal)
+
+                    order_type_str = signal.get("order_type", "MARKET")
+                    expiry_h = config.get("risk", {}).get("pending_order_expiry_hours", 24)
+
+                    if approved:
+                        action_badge = "🚀 ORDER PLACED"
+                        target_entry_txt = f"{signal['entry']:.5f} ({order_type_str})" if order_type_str != "MARKET" else "Market"
+                        append_live_log(f"✅ [{actual_sym}] RISK APPROVED! Placing {order_type_str} {lots} lots @ {target_entry_txt} | SL: {signal['stop_loss']:.5f} | TP: {signal.get('take_profit') or 'Trailing'}")
+                        ticket = exec_agent.place_order(
                             symbol=actual_sym,
-                            direction=f"{signal['direction']} ({order_type_str})",
+                            direction=signal["direction"],
                             lots=lots,
-                            entry=signal["entry"],
-                            sl=signal["stop_loss"],
-                            tp=signal.get("take_profit"),
-                            strategy=signal["strategy"],
-                            score=score
+                            stop_loss=signal["stop_loss"],
+                            take_profit=signal.get("take_profit"),
+                            strategy_name=signal["strategy"],
+                            order_type_str=order_type_str,
+                            entry_price=signal.get("entry"),
+                            expiration_hours=expiry_h
                         )
-                else:
-                    action_badge = "⚠️ RISK REJECTED"
-                    append_live_log(f"⚠️ [{actual_sym}] Trade Rejected by Risk Manager: {reason}")
+                        if ticket:
+                            circuit_breaker.record_execution_success()
+                            append_live_log(f"🎉 [{actual_sym}] Live {order_type_str} Order Placed in MT5! Ticket #{ticket} (Auto-exp: {expiry_h}h)")
+                            notifier.notify_trade_opened(
+                                symbol=actual_sym,
+                                direction=f"{signal['direction']} ({order_type_str})",
+                                lots=lots,
+                                entry=signal["entry"],
+                                sl=signal["stop_loss"],
+                                tp=signal.get("take_profit"),
+                                strategy=signal["strategy"],
+                                score=score
+                            )
+                        else:
+                            # Record execution failure for circuit breaker (Rule 11)
+                            tripped = circuit_breaker.record_execution_error("Order placement rejected by MT5 terminal.")
+                            if tripped:
+                                append_live_log(f"🚨 [CIRCUIT BREAKER TRIPPED] Order placement halted due to repeated broker rejections.", level="ERROR")
+                    else:
+                        action_badge = "⚠️ RISK REJECTED"
+                        append_live_log(f"⚠️ [{actual_sym}] Trade Rejected by Risk Manager: {reason}")
 
         scanner_matrix_rows.append({
             "symbol": actual_sym,

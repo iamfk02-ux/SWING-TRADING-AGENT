@@ -98,6 +98,18 @@ risk:
   max_spread_to_stop_ratio: 0.10   # spread must be <= 10% of stop distance
   max_spread_vs_normal: 2.0        # spread must be <= 2x its normal level
   max_entry_slippage_atr: 0.3      # skip if price ran away > 0.3 x ATR(H4)
+  # Strategy Health Degradation Guard (Rule 10)
+  strategy_health:
+    enabled: true
+    min_lookback_trades: 5         # minimum trades before evaluating degradation
+    max_consecutive_losses: 3      # if 3 losses in a row -> throttle strategy risk to 50%
+    min_win_rate_pct: 35.0         # if rolling win rate < 35% -> throttle strategy risk to 50%
+    recovery_trades: 2             # consecutive wins required to restore full health
+  # Execution Circuit Breaker (Rule 11)
+  circuit_breaker:
+    enabled: true
+    max_consecutive_exec_errors: 3 # pause order placement if 3 broker errors occur
+    pause_duration_minutes: 60     # cooldown time in minutes
   # No new forex entries on Friday after this hour (broker server time).
   # Server time is usually UK time + 2 hours, so 18 = 16:00 UK.
   friday_cutoff_server_hour: 18

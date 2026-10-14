@@ -31,6 +31,13 @@ class RiskManager:
         except Exception:
             self.news_guard = None
 
+        # Strategy Health Degradation Monitor (Rule 10)
+        try:
+            from core.strategy_health import StrategyHealthMonitor
+            self.health_monitor = StrategyHealthMonitor(config)
+        except Exception:
+            self.health_monitor = None
+
     def _get_currency_components(self, symbol: str) -> List[str]:
         """Extracts individual currencies from a symbol string."""
         s = symbol.upper().replace(".C", "").replace("M", "").replace(".RAW", "")
@@ -116,10 +123,17 @@ class RiskManager:
             if curr_counts.get(c, 0) >= 2:
                 return False, f"CORRELATION LIMIT: Maximum exposure for currency '{c}' reached ({curr_counts[c]} active/pending)", 0.0
 
-        # 4. Effective Risk calculation (Throttled if in drawdown)
+        # 4. Effective Risk calculation (Throttled if in drawdown or if strategy is degraded)
         effective_risk_pct = self.risk_pct
         if drawdown_pct >= self.throttle_pct:
-            effective_risk_pct = self.risk_pct * 0.5  # Halved to 0.5%
+            effective_risk_pct = self.risk_pct * 0.5  # Halved to 0.5% on portfolio drawdown
+
+        # Rule 10: Apply strategy health multiplier
+        strat_name = signal.get("strategy", "TREND")
+        if self.health_monitor:
+            health = self.health_monitor.evaluate_strategy_health(strat_name)
+            if health.get("risk_multiplier", 1.0) < 1.0:
+                effective_risk_pct *= health["risk_multiplier"]
 
         risk_amount_usd = account_equity * (effective_risk_pct / 100.0)
 
