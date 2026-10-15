@@ -319,7 +319,7 @@ with st.sidebar:
     st.markdown("• **Regime Filter:** `Daily (D1)` (Macro Safety)")
     st.markdown("• **Order Types:** `Limit & Stop Pending`")
     st.markdown("• **Pending Expiration:** `24 Hours`")
-    st.markdown("• **Crypto Weekend:** `24/7 Active`")
+    st.markdown("• **Market Hours:** `24/5 Forex & Metals`")
     st.markdown("• **Risk Per Trade:** `1.0% Hard Cap`")
 
     st.markdown("---")
@@ -338,10 +338,11 @@ st.title("Trading Bot — Command Center")
 
 # Live market banner
 is_wknd = datetime.utcnow().weekday() in (5, 6)
+num_pairs = len(config.get("symbols", {}).get("forex", [])) + len(config.get("symbols", {}).get("metals", []))
 if is_wknd:
-    st.info("🕒 **Weekend Mode Active:** Traditional Forex and Metals markets are closed. The bot is scanning Crypto pairs 24/7 (BTCUSD, ETHUSD, SOLUSD). Forex resumes Sunday 5:00 PM EST.")
+    st.info("🕒 **Weekend Mode Active:** Traditional Forex and Metals markets are closed. Scanner is standing by until markets reopen Sunday 5:00 PM EST.")
 else:
-    st.success(f"🟢 **Weekday Market Active:** Actively scanning Forex, Gold (XAUUSD), and Crypto on **{active_tf} ({'4-Hour Swing' if active_tf == 'H4' else '1-Hour'})** candles every 5 minutes.")
+    st.success(f"🟢 **Weekday Market Active:** Actively scanning {num_pairs} Forex & Metals pairs on **{active_tf} ({'4-Hour Swing' if active_tf == 'H4' else '1-Hour'})** candles every 5 minutes.")
 
 try:
     import MetaTrader5 as mt5
@@ -579,13 +580,9 @@ with tab_history:
 
         ---
 
-        ### 🪙 24/7 Crypto Weekend Trading
-        - **Forex & Gold:** Close on Friday 5:00 PM EST and reopen Sunday 5:00 PM EST.
-        - **Crypto (BTCUSD, ETHUSD, SOLUSD):** Trades 24 hours a day, 7 days a week, 365 days a year.
-        - **Trading Crypto on weekends:**
-          1. The bot is fully programmed to scan and trade crypto 24/7.
-          2. The default `MetaQuotes-Demo` broker only provides Forex, Metals, and US Nasdaq ETFs (which close on weekends).
-          3. To trade crypto on weekends with demo money, open a free Demo account in MT5 with a broker offering Crypto CFDs (e.g., Exness, IC Markets, Bybit MT5). Inside MT5: *File -> Open an Account -> Search 'Exness' -> Open Demo*. The bot will automatically detect it!
+        ### 🌍 Market Hours (24/5 Execution)
+        - **Forex & Gold (XAUUSD):** Markets open Sunday 5:00 PM EST and close Friday 5:00 PM EST.
+        - **Weekend Protocol:** The scanner automatically stands down when markets are closed and resumes scanning automatically when trading sessions reopen Sunday afternoon.
         """)
 
 # TAB 2: HUMAN NEWS DESK
@@ -597,7 +594,7 @@ with tab_news:
         col_c1, col_c2, col_c3 = st.columns(3)
         with col_c1:
             asset = st.selectbox("Select Currency / Asset", [
-                "USD", "EUR", "GBP", "JPY", "AUD", "CAD", "CHF", "NZD", "XAU", "BTC", "ETH"
+                "USD", "EUR", "GBP", "JPY", "AUD", "CAD", "CHF", "NZD", "XAU"
             ])
         with col_c2:
             bias_label = st.select_slider(
@@ -654,7 +651,7 @@ with tab_news:
                     with c_act1:
                         target_curr = st.selectbox(
                             "Focus Currency:",
-                            options=article['currencies'] if article['currencies'] != ["GLOBAL"] else ["USD", "EUR", "GBP", "JPY", "AUD", "CAD", "CHF", "NZD", "XAU", "BTC"],
+                            options=article['currencies'] if article['currencies'] != ["GLOBAL"] else ["USD", "EUR", "GBP", "JPY", "AUD", "CAD", "CHF", "NZD", "XAU"],
                             key=f"curr_select_{idx}"
                         )
                     with c_act2:
@@ -693,7 +690,7 @@ with tab_news:
 
         st.markdown("---")
         st.markdown("#### ✍️ Or Paste Custom News Excerpt")
-        custom_curr = st.selectbox("Currency Affected", ["USD", "EUR", "GBP", "JPY", "AUD", "CAD", "CHF", "NZD", "XAU", "BTC"], key="custom_curr_box")
+        custom_curr = st.selectbox("Currency Affected", ["USD", "EUR", "GBP", "JPY", "AUD", "CAD", "CHF", "NZD", "XAU"], key="custom_curr_box")
         custom_text = st.text_area("Paste any headline or article text:", height=90, key="custom_text_box", placeholder="Paste breaking news here...")
         if st.button("🧠 Analyze Custom Text"):
             if custom_text.strip():

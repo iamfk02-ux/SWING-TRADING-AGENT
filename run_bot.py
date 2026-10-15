@@ -47,9 +47,6 @@ def resolve_mt5_symbol(symbol: str) -> Optional[str]:
 
     # Known aliases across different broker naming conventions
     aliases_map = {
-        "BTCUSD": ["BTCUSD", "BTCUSDT", "BTC/USD", "XBTUSD", "BTC"],
-        "ETHUSD": ["ETHUSD", "ETHUSDT", "ETH/USD", "ETH"],
-        "SOLUSD": ["SOLUSD", "SOLUSDT", "SOL/USD", "SOL"],
         "XAUUSD": ["XAUUSD", "GOLD", "XAU/USD"],
     }
 
@@ -114,14 +111,13 @@ def run_cycle(cycle_num: int = 1) -> int:
     is_weekend = datetime.utcnow().weekday() in (5, 6)
     forex_syms = config.get("symbols", {}).get("forex", [])
     metal_syms = config.get("symbols", {}).get("metals", [])
-    crypto_syms = config.get("symbols", {}).get("crypto", [])
 
     if is_weekend:
-        symbols_to_scan = crypto_syms
-        append_live_log(f"🕒 Weekend Mode Active: Traditional Forex/Metals markets closed. Scanning Crypto 24/7 ({', '.join(crypto_syms)}).")
+        symbols_to_scan = []
+        append_live_log("🕒 Weekend Standby: Forex and Metals markets are closed. Scanner in standby until Sunday 5:00 PM EST.")
     else:
-        symbols_to_scan = forex_syms + metal_syms + crypto_syms
-        append_live_log(f"🟢 Weekday Active: Full portfolio universe active ({len(symbols_to_scan)} symbols across Forex, Metals, Crypto).")
+        symbols_to_scan = forex_syms + metal_syms
+        append_live_log(f"🟢 Market Active: Scanning {len(symbols_to_scan)} symbols across Forex and Metals.")
 
     open_positions = exec_agent.get_open_positions()
     pending_orders = exec_agent.get_pending_orders()
@@ -447,7 +443,7 @@ def main():
     append_live_log("    SWING MULTI-AGENT TRADING BOT - LIVE ENGINE ONLINE")
     append_live_log("=" * 65)
     append_live_log(f"Active Timeframe: {timeframe} Candles (Lower Timeframe Scanning)")
-    append_live_log("Crypto Weekend Trading: ENABLED (24/7/365)")
+    append_live_log("Market Coverage: Forex & Metals (XAUUSD) - 24/5")
     append_live_log("Cycle Interval: 5 Minutes (300 seconds)")
 
     cycle_count = 0

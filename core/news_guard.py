@@ -80,10 +80,6 @@ class NewsGuard:
 
         sym_clean = symbol.upper().replace(".C", "").replace("M", "").replace(".RAW", "")
         
-        # Crypto symbols trade 24/7 and are not direct central bank currency releases
-        if any(c in sym_clean for c in ["BTC", "ETH", "SOL", "LTC", "XRP"]):
-            return False, None
-
         # Extract base and quote currency (e.g. EURUSD -> ['EUR', 'USD'], XAUUSD -> ['USD'])
         currencies_to_check = []
         if "XAU" in sym_clean or "GOLD" in sym_clean or "OIL" in sym_clean or "US30" in sym_clean or "SPX" in sym_clean:

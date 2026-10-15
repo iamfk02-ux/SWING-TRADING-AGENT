@@ -24,8 +24,7 @@ CURRENCY_KEYWORDS = {
     "CAD": ["bank of canada", "boc", "loonie", "cad", "canada"],
     "CHF": ["snb", "swiss national bank", "swiss franc", "chf", "switzerland"],
     "NZD": ["rbnz", "kiwi", "nzd", "new zealand"],
-    "XAU": ["gold", "xau", "bullion", "precious metal"],
-    "BTC": ["bitcoin", "btc", "crypto", "ethereum", "eth"]
+    "XAU": ["gold", "xau", "bullion", "precious metal"]
 }
 
 

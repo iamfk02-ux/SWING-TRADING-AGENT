@@ -72,11 +72,6 @@ symbols:
   # Metals: high volatility, active during weekdays
   metals:
     - XAUUSD
-  # Crypto: traded 24/7 including weekends!
-  crypto:
-    - BTCUSD
-    - ETHUSD
-    - SOLUSD
 
 # ---------------------------------------------------------------------
 # RISK MANAGER  (hard rules - the optimizer can never change these)
@@ -87,7 +82,6 @@ risk:
   max_open_positions: 3
   max_total_open_risk_pct: 3.0
   max_currency_exposure_pct: 2.0   # net risk on any single currency
-  max_crypto_risk_pct: 1.0         # BTC + ETH combined
   pending_orders_enabled: true     # Use Limit orders on pullbacks & Stop orders on breakouts
   pending_order_expiry_hours: 24   # Auto-cancel pending orders if unfilled after 24 hours (6 H4 candles)
   daily_loss_limit_pct: 3.0

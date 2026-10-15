@@ -65,9 +65,7 @@ class RiskManager:
         pending_orders = pending_orders or []
 
         # 0. Weekend Market Status Check
-        # Crypto trades 24/7. Forex and Metals close on weekends (Friday 5pm EST to Sunday 5pm EST).
-        is_crypto = any(c in symbol for c in ["BTC", "ETH", "SOL", "CRYPTO", "BITCOIN", "LTC"])
-        
+        # Forex and Metals close on weekends (Friday 5pm EST to Sunday 5pm EST).
         is_weekend = False
         if "timestamp" in signal and signal["timestamp"]:
             try:
@@ -79,8 +77,8 @@ class RiskManager:
         else:
             is_weekend = datetime.utcnow().weekday() in (5, 6)
 
-        if is_weekend and not is_crypto:
-            return False, f"WEEKEND: {symbol} market is closed. Crypto trades 24/7.", 0.0
+        if is_weekend:
+            return False, f"WEEKEND: {symbol} market is closed. Traditional markets resume Sunday 5:00 PM EST.", 0.0
 
         # 0.5 High-Impact News Filter (Economic Calendar Shield)
         if self.news_guard:
@@ -169,11 +167,7 @@ class RiskManager:
 
         if not mt5_connected:
             # Universal fallback position sizing
-            if is_crypto:
-                # 1 standard lot = 1 coin (e.g. 1 BTC). Risk per 1 lot = stop_dist in USD.
-                raw_lots = risk_amount_usd / stop_dist
-                min_lot = 0.01
-            elif "XAU" in symbol or "GOLD" in symbol:
+            if "XAU" in symbol or "GOLD" in symbol:
                 # 1 standard lot = 100 troy oz. $1 move = $100 per lot.
                 cost_per_lot = stop_dist * 100.0
                 raw_lots = risk_amount_usd / max(cost_per_lot, 1.0)
@@ -192,12 +186,11 @@ class RiskManager:
 
         # Check maximum safety threshold (hard limit 2.5% of account on minimum lot)
         # Prevent oversized fills on very small cent balances
-        if not is_crypto:
-            pip_size = 0.01 if "JPY" in symbol else 0.0001
-            stop_pips = stop_dist / pip_size
-            pip_val_per_lot = 10.0 if not self.is_cent_account else 0.10
-            actual_risk_usd = rounded_lots * stop_pips * pip_val_per_lot
-            if actual_risk_usd > (account_equity * 0.025):
-                return False, f"MIN LOT TOO LARGE FOR ACCOUNT (${actual_risk_usd:.2f} > 2.5% max risk cap)", 0.0
+        pip_size = 0.01 if "JPY" in symbol else 0.0001
+        stop_pips = stop_dist / pip_size
+        pip_val_per_lot = 10.0 if not self.is_cent_account else 0.10
+        actual_risk_usd = rounded_lots * stop_pips * pip_val_per_lot
+        if actual_risk_usd > (account_equity * 0.025):
+            return False, f"MIN LOT TOO LARGE FOR ACCOUNT (${actual_risk_usd:.2f} > 2.5% max risk cap)", 0.0
 
         return True, "APPROVED", rounded_lots
