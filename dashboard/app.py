@@ -588,139 +588,115 @@ with tab_history:
 
 # TAB 2: HUMAN NEWS DESK
 with tab_news:
-    st.subheader("Give the Bot Your Market View")
-    st.write("You don't need code to influence the bot. Set your opinion on any currency below, and the bot will factor it into its scoring.")
+    st.subheader("🛡️ Automated News Shield & Fundamental Bias")
+    st.caption("Protect your trades from unpredictable news volatility and guide the bot's direction with your macro views.")
 
-    with st.form("news_form"):
-        col_c1, col_c2, col_c3 = st.columns(3)
-        with col_c1:
-            asset = st.selectbox("Select Currency / Asset", [
-                "USD", "EUR", "GBP", "JPY", "AUD", "CAD", "CHF", "NZD", "XAU"
-            ])
-        with col_c2:
-            bias_label = st.select_slider(
-                "Your Macro Bias",
-                options=["Strong Bearish (-2)", "Bearish (-1)", "Neutral (0)", "Bullish (+1)", "Strong Bullish (+2)"],
-                value="Neutral (0)"
-            )
-        with col_c3:
-            days = st.number_input("Days Active", min_value=1, max_value=30, value=7)
-
-        note = st.text_input("Reason (e.g. 'Upcoming rate hike', 'Bullish weekly trend')")
-        submitted = st.form_submit_button("💾 Save View")
-
-        if submitted:
-            bias_val = 0
-            if "-2" in bias_label: bias_val = -2
-            elif "-1" in bias_label: bias_val = -1
-            elif "+1" in bias_label: bias_val = 1
-            elif "+2" in bias_label: bias_val = 2
-
-            expiry = (datetime.utcnow() + timedelta(days=days)).isoformat()
-            with sqlite3.connect(DB_PATH) as conn:
-                cursor = conn.cursor()
-                cursor.execute("""
-                    INSERT INTO news_bias (created_at, asset, bias, expires_at, note)
-                    VALUES (?, ?, ?, ?, ?)
-                """, (datetime.utcnow().isoformat(), asset, bias_val, expiry, note))
-                conn.commit()
-            st.success(f"Saved: {asset} is set to {bias_label} until {expiry[:10]}!")
-
-    st.markdown("---")
-    st.markdown("### 📰 Breaking Market News & Auto-Analysis")
-    st.write(
-        "Real-time news stories and reports are pulled automatically below. "
-        "You can read the article summary, click **'🧠 Analyze with AI'**, and let the assistant explain the market impact and set your bias with one click."
-    )
-
-    from core.news_feed import get_latest_financial_news
     from core.news_assistant import get_upcoming_economic_events, analyze_news_snippet
+    from core.database import delete_news_bias, clear_all_news_biases
 
-    col_news_feed, col_cal_right = st.columns([1.5, 1])
+    col_bias, col_calendar = st.columns([1, 1.2], gap="large")
 
-    with col_news_feed:
-        st.markdown("#### ⚡ Latest Breaking Financial Articles")
-        news_articles = get_latest_financial_news(limit=10)
-        
-        if news_articles:
-            for idx, article in enumerate(news_articles):
-                with st.expander(f"📌 {article['title']} ({', '.join(article['currencies'])})", expanded=(idx == 0)):
-                    st.caption(f"📅 Published: {article['date']}")
-                    st.write(article['summary'])
-                    
-                    c_act1, c_act2 = st.columns([1, 1.2])
-                    with c_act1:
-                        target_curr = st.selectbox(
-                            "Focus Currency:",
-                            options=article['currencies'] if article['currencies'] != ["GLOBAL"] else ["USD", "EUR", "GBP", "JPY", "AUD", "CAD", "CHF", "NZD", "XAU"],
-                            key=f"curr_select_{idx}"
-                        )
-                    with c_act2:
-                        analyze_clicked = st.button("🧠 Analyze Market Impact", key=f"btn_analyze_{idx}")
+    # ---------------------------------------------------------
+    # LEFT COLUMN: DIRECT CURRENCY BIAS CONTROL
+    # ---------------------------------------------------------
+    with col_bias:
+        st.markdown("#### 🎯 Set Currency Bias")
+        st.write("Influence the bot's scoring directly without code. Setting a Bullish bias prioritizes buys; Bearish penalizes or blocks them.")
 
-                    if analyze_clicked:
-                        analysis = analyze_news_snippet(article['full_text'], target_curr)
-                        st.markdown(f"**AI Recommendation:** `{analysis['verdict']}`")
-                        st.info(f"💡 **Plain English Explanation:** {analysis['advice']}")
-                        st.write("**Detected Signals:**")
-                        for r in analysis["reasons"]:
-                            st.write(f"- {r}")
+        with st.form("quick_bias_form"):
+            b_col1, b_col2 = st.columns(2)
+            with b_col1:
+                bias_curr = st.selectbox(
+                    "Currency / Asset",
+                    ["USD", "EUR", "GBP", "JPY", "AUD", "CAD", "CHF", "NZD", "XAU"],
+                    key="bias_curr_select"
+                )
+            with b_col2:
+                bias_days = st.number_input("Days Active", min_value=1, max_value=14, value=3)
 
-                        if st.button(f"⚡ Apply '{analysis['verdict']}' to {target_curr} in Bot", key=f"btn_apply_{idx}"):
-                            expiry = (datetime.utcnow() + timedelta(days=5)).isoformat()
-                            with sqlite3.connect(DB_PATH) as conn:
-                                cursor = conn.cursor()
-                                cursor.execute("""
-                                    INSERT INTO news_bias (created_at, asset, bias, expires_at, note)
-                                    VALUES (?, ?, ?, ?, ?)
-                                """, (datetime.utcnow().isoformat(), target_curr, analysis["bias"], expiry, f"News Feed: {article['title'][:60]}..."))
-                                conn.commit()
-                            st.success(f"Successfully applied {analysis['verdict']} to {target_curr}!")
-                            st.rerun()
-        else:
-            st.warning("Loading breaking news articles or feed temporarily unavailable.")
+            bias_stance = st.radio(
+                "Your Macro Bias:",
+                options=["🟢 Bullish (+1)", "⚪ Neutral (0)", "🔴 Bearish (-1)"],
+                horizontal=True,
+                index=0
+            )
 
-    with col_cal_right:
-        st.markdown("#### 📅 High-Impact Calendar")
+            bias_note = st.text_input("Optional Reason (e.g. 'Hawkish central bank', 'Strong GDP')", placeholder="Why this bias?")
+            submitted_bias = st.form_submit_button("💾 Save Macro Bias", use_container_width=True, type="primary")
+
+            if submitted_bias:
+                b_val = 1 if "Bullish" in bias_stance else (-1 if "Bearish" in bias_stance else 0)
+                expiry_dt = (datetime.utcnow() + timedelta(days=bias_days)).isoformat()
+                with sqlite3.connect(DB_PATH) as conn:
+                    cur = conn.cursor()
+                    cur.execute("""
+                        INSERT INTO news_bias (created_at, asset, bias, expires_at, note)
+                        VALUES (?, ?, ?, ?, ?)
+                    """, (datetime.utcnow().isoformat(), bias_curr, b_val, expiry_dt, bias_note or "Manual input"))
+                    conn.commit()
+                st.success(f"✅ Set {bias_curr} to {bias_stance} for {bias_days} days!")
+                st.rerun()
+
+        st.markdown("---")
+        st.markdown("#### 📋 Currently Active Biases")
+        if DB_PATH.exists():
+            with sqlite3.connect(DB_PATH) as conn:
+                df_biases = pd.read_sql_query("""
+                    SELECT id, asset AS 'Currency', bias AS 'Bias (-1 to +1)', expires_at AS 'Expires At', note AS 'Reason' 
+                    FROM news_bias 
+                    WHERE expires_at > datetime('now')
+                    ORDER BY id DESC
+                """, conn)
+                if not df_biases.empty:
+                    st.dataframe(df_biases[["Currency", "Bias (-1 to +1)", "Expires At", "Reason"]], use_container_width=True, hide_index=True)
+                    if st.button("🗑️ Clear All Active Biases", use_container_width=True):
+                        clear_all_news_biases(DB_PATH)
+                        st.success("All active biases cleared!")
+                        st.rerun()
+                else:
+                    st.info("No active currency biases set. The bot is running 100% on pure technical consensus.")
+
+    # ---------------------------------------------------------
+    # RIGHT COLUMN: LIVE CALENDAR & PRE-NEWS SHIELD
+    # ---------------------------------------------------------
+    with col_calendar:
+        st.markdown("#### 📅 Live High-Impact Calendar")
+        st.info("🛡️ **Automated News Shield Active:** New entries on affected currencies are paused 30m before & after Red Folder releases. Open positions in profit (≥ +0.5R) are automatically locked to Break-Even.")
+
         events = get_upcoming_economic_events()
         if events:
             df_ev = pd.DataFrame(events)
-            st.dataframe(df_ev[["country", "title", "impact", "date", "forecast", "previous"]], use_container_width=True, height=350)
+            st.dataframe(
+                df_ev[["country", "title", "impact", "date", "forecast", "previous"]],
+                use_container_width=True,
+                height=260,
+                hide_index=True
+            )
         else:
-            st.write("No high-impact events found.")
+            st.caption("No high-impact events scheduled for the current session.")
 
         st.markdown("---")
-        st.markdown("#### ✍️ Or Paste Custom News Excerpt")
-        custom_curr = st.selectbox("Currency Affected", ["USD", "EUR", "GBP", "JPY", "AUD", "CAD", "CHF", "NZD", "XAU"], key="custom_curr_box")
-        custom_text = st.text_area("Paste any headline or article text:", height=90, key="custom_text_box", placeholder="Paste breaking news here...")
-        if st.button("🧠 Analyze Custom Text"):
-            if custom_text.strip():
-                c_analysis = analyze_news_snippet(custom_text, custom_curr)
-                st.markdown(f"**Verdict:** `{c_analysis['verdict']}`")
-                st.write(f"📌 {c_analysis['advice']}")
-                if st.button(f"⚡ Apply '{c_analysis['verdict']}' to {custom_curr}", key="btn_apply_custom"):
-                    expiry = (datetime.utcnow() + timedelta(days=5)).isoformat()
-                    with sqlite3.connect(DB_PATH) as conn:
-                        cursor = conn.cursor()
-                        cursor.execute("""
-                            INSERT INTO news_bias (created_at, asset, bias, expires_at, note)
-                            VALUES (?, ?, ?, ?, ?)
-                        """, (datetime.utcnow().isoformat(), custom_curr, c_analysis["bias"], expiry, f"Custom Input: {custom_text[:60]}..."))
-                        conn.commit()
-                    st.success(f"Applied to {custom_curr}!")
-                    st.rerun()
-
-    st.markdown("---")
-    st.markdown("#### Currently Active Biases in the Bot")
-    if DB_PATH.exists():
-        with sqlite3.connect(DB_PATH) as conn:
-            df_biases = pd.read_sql_query(
-                "SELECT asset, bias, expires_at, note FROM news_bias ORDER BY id DESC LIMIT 10", conn
-            )
-            if not df_biases.empty:
-                st.dataframe(df_biases, use_container_width=True)
-            else:
-                st.write("No active news biases set yet.")
+        with st.expander("🧠 Quick Headline AI Impact Analyzer (Paste News Text)", expanded=False):
+            st.caption("Paste any breaking headline or central bank speech to let the assistant decode it and give you an instant recommendation.")
+            h_curr = st.selectbox("Currency Affected", ["USD", "EUR", "GBP", "JPY", "AUD", "CAD", "CHF", "NZD", "XAU"], key="h_curr_box")
+            h_text = st.text_area("Paste headline / text:", height=75, placeholder="e.g. US Core CPI rises 0.4% higher than expected...", key="h_text_area")
+            
+            if st.button("🔍 Analyze Impact", use_container_width=True):
+                if h_text.strip():
+                    ai_res = analyze_news_snippet(h_text, h_curr)
+                    st.markdown(f"**AI Recommendation:** `{ai_res['verdict']}`")
+                    st.write(f"💡 {ai_res['advice']}")
+                    if st.button(f"⚡ Apply '{ai_res['verdict']}' to {h_curr}", key="btn_apply_ai_headline", type="primary"):
+                        exp_dt = (datetime.utcnow() + timedelta(days=3)).isoformat()
+                        with sqlite3.connect(DB_PATH) as conn:
+                            cur = conn.cursor()
+                            cur.execute("""
+                                INSERT INTO news_bias (created_at, asset, bias, expires_at, note)
+                                VALUES (?, ?, ?, ?, ?)
+                            """, (datetime.utcnow().isoformat(), h_curr, ai_res["bias"], exp_dt, f"AI Headline: {h_text[:50]}..."))
+                            conn.commit()
+                        st.success(f"Applied {ai_res['verdict']} to {h_curr}!")
+                        st.rerun()
 
 # TAB 3: DECISION LOG
 with tab_signals:

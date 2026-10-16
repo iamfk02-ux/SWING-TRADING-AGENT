@@ -22,7 +22,9 @@ class NewsGuard:
         self.enabled = news_cfg.get("enabled", True)
         self.blackout_minutes_before = news_cfg.get("blackout_minutes_before", 30)
         self.blackout_minutes_after = news_cfg.get("blackout_minutes_after", 30)
+        self.advance_alert_minutes = news_cfg.get("advance_alert_minutes", 30)
         self.events: List[Dict[str, Any]] = []
+        self.alerted_events = set()
         self._load_or_fetch_events()
 
     def _load_or_fetch_events(self):
@@ -124,3 +126,52 @@ class NewsGuard:
                 return True, f"HIGH-IMPACT NEWS: '{ev.get('title')}' ({event_currency}) released {mins_ago}m ago"
 
         return False, None
+
+    def get_upcoming_high_impact_events(self, window_minutes: Optional[int] = None) -> List[Dict[str, Any]]:
+        """
+        Returns all scheduled High-Impact events occurring within the next `window_minutes`.
+        """
+        if not self.enabled or not self.events:
+            return []
+
+        window = window_minutes or self.advance_alert_minutes
+        now = datetime.now(timezone.utc)
+        upcoming = []
+
+        for ev in self.events:
+            if ev.get("impact") != "High":
+                continue
+
+            date_str = ev.get("date", "")
+            if not date_str:
+                continue
+
+            try:
+                ev_time = datetime.fromisoformat(date_str)
+                ev_time_utc = ev_time.astimezone(timezone.utc)
+            except Exception:
+                continue
+
+            time_diff_mins = (ev_time_utc - now).total_seconds() / 60.0
+
+            if 0 <= time_diff_mins <= window:
+                country = str(ev.get("country", "")).upper()
+                title = str(ev.get("title", ""))
+                event_id = f"{country}_{title}_{date_str}"
+                upcoming.append({
+                    "id": event_id,
+                    "title": title,
+                    "country": country,
+                    "date": date_str,
+                    "minutes_until": max(1, int(time_diff_mins)),
+                    "forecast": ev.get("forecast", "-"),
+                    "previous": ev.get("previous", "-")
+                })
+
+        return upcoming
+
+    def is_event_alerted(self, event_id: str) -> bool:
+        return event_id in self.alerted_events
+
+    def mark_event_alerted(self, event_id: str):
+        self.alerted_events.add(event_id)

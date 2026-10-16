@@ -202,6 +202,80 @@ def run_cycle(cycle_num: int = 1) -> int:
     except Exception as e:
         append_live_log(f"Error checking closed trade history: {e}", level="WARNING")
 
+    # 0.9 Automated Pre-News Shield: Priority Advance Alerts & Active Position Protection
+    news_cfg = config.get("news", {})
+    if news_cfg.get("enabled", True):
+        try:
+            from core.news_guard import NewsGuard
+            news_guard = risk_manager.news_guard or NewsGuard(config)
+            advance_window = news_cfg.get("advance_alert_minutes", 30)
+            upcoming_events = news_guard.get_upcoming_high_impact_events(advance_window)
+
+            for event in upcoming_events:
+                ev_id = event["id"]
+                ev_curr = event["country"]
+                ev_title = event["title"]
+                mins_left = event["minutes_until"]
+
+                # Find active positions matching this currency
+                affected_positions = []
+                for p in open_positions:
+                    sym_clean = p["symbol"].upper().replace(".C", "").replace("M", "").replace(".RAW", "")
+                    if ev_curr in sym_clean or ("XAU" in sym_clean and ev_curr == "USD"):
+                        affected_positions.append(p)
+
+                affected_syms = [p["symbol"] for p in affected_positions]
+
+                # Priority Advance Telegram Alert (sent once per event)
+                if not news_guard.is_event_alerted(ev_id):
+                    news_guard.mark_event_alerted(ev_id)
+                    action_desc = f"New entries on {ev_curr} frozen (30m blackout window)."
+                    if affected_syms:
+                        action_desc += f" Protecting open positions ({', '.join(affected_syms)}) against spread widening."
+                    notifier.notify_news_shield_warning(
+                        event_title=ev_title,
+                        currency=ev_curr,
+                        minutes_until=mins_left,
+                        affected_positions=affected_syms,
+                        shield_action=action_desc
+                    )
+                    append_live_log(f"🚨 [NEWS SHIELD ALERT] {ev_title} ({ev_curr}) in ~{mins_left}m! Active positions affected: {affected_syms or 'None'}")
+
+                # Automated Position Defense: If in profit (>= +0.5R), secure Stop Loss to Break-Even
+                if news_cfg.get("auto_breakeven_before_news", True):
+                    for p in affected_positions:
+                        sym = p["symbol"]
+                        entry = p["entry_price"]
+                        sl = p["sl"]
+                        tick = mt5.symbol_info_tick(sym)
+                        if not tick:
+                            continue
+                        current_price = tick.bid if p["direction"] == "BUY" else tick.ask
+
+                        # Calculate current risk distance
+                        df_d1, df_lower = data_agent.get_bars(sym, timeframe=timeframe)
+                        lower_atr = compute_atr(df_lower, 14).iloc[-1] if len(df_lower) > 15 else 0.0010
+                        risk_dist = abs(entry - sl) if (sl > 0 and ((p["direction"] == "BUY" and sl < entry) or (p["direction"] == "SELL" and sl > entry))) else (1.2 * lower_atr)
+
+                        profit_dist = (current_price - entry) if p["direction"] == "BUY" else (entry - current_price)
+                        if profit_dist >= (0.5 * risk_dist):
+                            needs_be = (p["direction"] == "BUY" and sl < entry) or (p["direction"] == "SELL" and (sl > entry or sl == 0))
+                            if needs_be:
+                                be_sl = round(entry + (0.05 * risk_dist), 5) if p["direction"] == "BUY" else round(entry - (0.05 * risk_dist), 5)
+                                exec_agent.modify_stop_loss(p["ticket"], be_sl)
+                                append_live_log(f"🛡️ [NEWS SHIELD] Position {sym} secured ahead of '{ev_title}'! Stop Loss moved to Break-Even at {be_sl:.5f}")
+                                notifier.notify_news_shield_protected(sym, ev_title, be_sl)
+
+                # Auto-cancel pending orders on affected currency to prevent bad fills/slippage
+                if news_cfg.get("cancel_pending_before_news", True):
+                    for pend in pending_orders:
+                        p_sym = pend.get("symbol", "").upper().replace(".C", "").replace("M", "").replace(".RAW", "")
+                        if ev_curr in p_sym or ("XAU" in p_sym and ev_curr == "USD"):
+                            exec_agent.cancel_pending_order(pend["ticket"])
+                            append_live_log(f"🚫 [NEWS SHIELD] Cancelled pending order #{pend['ticket']} on {pend.get('symbol')} ahead of '{ev_title}' to prevent slippage.")
+        except Exception as e:
+            append_live_log(f"News Shield check error: {e}", level="WARNING")
+
     # 1. Partial Take Profit (50%) & Trailing Stops for open positions
     for pos in open_positions:
         sym = pos["symbol"]
@@ -351,8 +425,10 @@ def run_cycle(cycle_num: int = 1) -> int:
             if winning_signal:
                 signal = winning_signal
                 action_badge = "🔥 SETUP FOUND"
-                score = scorer.score_signal(signal)
-                append_live_log(f"⚡ [{actual_sym}] SETUP DETECTED! Strategy: {signal['strategy']} {signal['direction']} | Final Score: {score:.2f}")
+                from core.database import get_symbol_news_modifier
+                news_mod, news_note = get_symbol_news_modifier(actual_sym, signal["direction"])
+                score = scorer.score_signal(signal, news_modifier=news_mod)
+                append_live_log(f"⚡ [{actual_sym}] SETUP DETECTED! Strategy: {signal['strategy']} {signal['direction']} | Final Score: {score:.2f} (News Modifier: {news_mod:.2f} - {news_note})")
 
                 if scorer.is_eligible(score):
                     approved, reason, lots = risk_manager.evaluate_order(

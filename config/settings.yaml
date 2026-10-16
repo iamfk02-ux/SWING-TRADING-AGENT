@@ -30,6 +30,9 @@ news:
   enabled: true                    # Automatically blocks trades during high-impact news
   blackout_minutes_before: 30      # Minutes before high-impact release to pause entries
   blackout_minutes_after: 30       # Minutes after high-impact release to pause entries
+  advance_alert_minutes: 30        # Minutes before high-impact release to send priority Telegram alert
+  auto_breakeven_before_news: true # Automatically move SL to BE on in-profit trades (>= +0.5R) before news
+  cancel_pending_before_news: true # Automatically cancel pending orders on affected currency to avoid slippage
 
 # ---------------------------------------------------------------------
 # MT5 CONNECTION

@@ -130,3 +130,81 @@ def log_signal(signal: Dict[str, Any], db_path: Path = DB_PATH) -> int:
         ))
         conn.commit()
         return cursor.lastrowid
+
+
+def get_symbol_news_modifier(symbol: str, direction: str, db_path: Path = DB_PATH) -> tuple:
+    """
+    Computes a news multiplier (0.70 to 1.30) based on active human news biases.
+    Returns: (multiplier: float, summary_note: str)
+    """
+    if not db_path.exists():
+        return 1.0, "Neutral"
+    try:
+        now_iso = datetime.utcnow().isoformat()
+        with sqlite3.connect(db_path) as conn:
+            cur = conn.cursor()
+            rows = cur.execute("""
+                SELECT asset, bias, note FROM news_bias 
+                WHERE expires_at > ? 
+                ORDER BY id DESC
+            """, (now_iso,)).fetchall()
+
+        if not rows:
+            return 1.0, "Neutral"
+
+        s = symbol.upper().replace(".C", "").replace("M", "").replace(".RAW", "")
+        base = s[:3] if len(s) >= 6 else s
+        quote = s[3:6] if len(s) >= 6 else ""
+        if "XAU" in s or "GOLD" in s:
+            base, quote = "XAU", "USD"
+
+        multiplier = 1.0
+        notes = []
+
+        for asset, bias, note in rows:
+            asset = asset.upper()
+            if asset == base:
+                # If Long base currency and Bullish bias: boost score!
+                mult = 1.0 + (bias * 0.10) if direction == "BUY" else 1.0 - (bias * 0.10)
+                multiplier *= mult
+                notes.append(f"{base} bias ({bias:+d})")
+
+            elif asset == quote:
+                # If Long base currency and Bullish quote currency: penalize score!
+                mult = 1.0 - (bias * 0.10) if direction == "BUY" else 1.0 + (bias * 0.10)
+                multiplier *= mult
+                notes.append(f"{quote} bias ({bias:+d})")
+
+        final_mult = round(max(0.60, min(1.40, multiplier)), 2)
+        summary = ", ".join(notes) if notes else "Neutral"
+        return final_mult, summary
+    except Exception:
+        return 1.0, "Neutral"
+
+
+def delete_news_bias(bias_id: int, db_path: Path = DB_PATH) -> bool:
+    """Removes a specific bias record by ID."""
+    if not db_path.exists():
+        return False
+    try:
+        with sqlite3.connect(db_path) as conn:
+            cur = conn.cursor()
+            cur.execute("DELETE FROM news_bias WHERE id = ?", (bias_id,))
+            conn.commit()
+            return True
+    except Exception:
+        return False
+
+
+def clear_all_news_biases(db_path: Path = DB_PATH) -> bool:
+    """Clears all human news biases."""
+    if not db_path.exists():
+        return False
+    try:
+        with sqlite3.connect(db_path) as conn:
+            cur = conn.cursor()
+            cur.execute("DELETE FROM news_bias")
+            conn.commit()
+            return True
+    except Exception:
+        return False

@@ -118,3 +118,43 @@ class TelegramNotifier:
             f"━━━━━━━━━━━━━━━━━━"
         )
         self.send_message(msg)
+
+    def notify_news_shield_warning(
+        self,
+        event_title: str,
+        currency: str,
+        minutes_until: int,
+        affected_positions: list,
+        shield_action: str
+    ):
+        pos_text = ", ".join(affected_positions) if affected_positions else "None (No active exposure)"
+        msg = (
+            f"⚠️ *HIGH-IMPACT NEWS SHIELD ALERT*\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"📅 *Event:* {event_title}\n"
+            f"🌍 *Currency:* `{currency}`\n"
+            f"⏳ *Time Until Release:* ~{minutes_until} Minutes\n"
+            f"⚡ *Expected Volatility:* High / Spread Spikes\n"
+            f"🎯 *Active Positions Affected:* `{pos_text}`\n"
+            f"🛡️ *Action Taken:* {shield_action}\n"
+            f"━━━━━━━━━━━━━━━━━━"
+        )
+        self.send_message(msg)
+
+    def notify_news_shield_protected(
+        self,
+        symbol: str,
+        event_title: str,
+        new_sl: float
+    ):
+        msg = (
+            f"🔒 *PRE-NEWS POSITION SECURED*\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"📈 *Symbol:* `{symbol}`\n"
+            f"📅 *Approaching Event:* {event_title}\n"
+            f"🛡️ *Stop-Loss Locked:* Moved to *Break-Even* at `{new_sl:.5f}`\n"
+            f"✅ *Status:* 100% Risk-Free against upcoming news whipsaw!\n"
+            f"━━━━━━━━━━━━━━━━━━"
+        )
+        self.send_message(msg)
+

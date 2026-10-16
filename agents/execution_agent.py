@@ -259,6 +259,17 @@ class ExecutionAgent:
             })
         return ord_list
 
+    def cancel_pending_order(self, ticket: int) -> bool:
+        """Cancels an active pending order in MT5."""
+        if not self.is_connected and not self.connect():
+            return False
+        request = {
+            "action": mt5.TRADE_ACTION_REMOVE,
+            "order": ticket
+        }
+        res = mt5.order_send(request)
+        return res is not None and res.retcode == mt5.TRADE_RETCODE_DONE
+
     def _record_trade(self, ticket, symbol, direction, lots, price, sl, tp, strategy):
         with sqlite3.connect(DB_PATH) as conn:
             cursor = conn.cursor()
