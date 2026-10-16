@@ -31,6 +31,7 @@ from agents.execution_agent import ExecutionAgent
 from core.database import init_db, log_signal
 from core.indicators import compute_atr
 from core.telegram_notifier import TelegramNotifier
+from core.config_loader import load_config
 
 try:
     import MetaTrader5 as mt5
@@ -71,9 +72,7 @@ def run_cycle(cycle_num: int = 1) -> int:
     Executes a single market scan cycle across all enabled pairs with real-time logging.
     Returns the number of scanned symbols.
     """
-    config_path = ROOT_DIR / "config" / "settings.yaml"
-    with open(config_path, "r") as f:
-        config = yaml.safe_load(f)
+    config = load_config()
 
     init_db()
 
@@ -513,9 +512,7 @@ def main():
     pid_file.parent.mkdir(parents=True, exist_ok=True)
     pid_file.write_text(str(os.getpid()))
 
-    config_path = ROOT_DIR / "config" / "settings.yaml"
-    with open(config_path, "r") as f:
-        config = yaml.safe_load(f)
+    config = load_config()
     timeframe = config.get("data", {}).get("timeframe", "H1").upper()
 
     append_live_log("=" * 65)

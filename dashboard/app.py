@@ -23,6 +23,7 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT_DIR))
 
 from core.bot_logger import get_live_logs, get_heartbeat, get_scanner_matrix, append_live_log
+from core.config_loader import load_config
 
 DB_PATH = ROOT_DIR / "data" / "trading_journal.db"
 CONFIG_PATH = ROOT_DIR / "config" / "settings.yaml"
@@ -307,10 +308,7 @@ with st.sidebar:
             st.rerun()
 
     # Load config safely
-    config = {}
-    if CONFIG_PATH.exists():
-        with open(CONFIG_PATH, "r") as f:
-            config = yaml.safe_load(f) or {}
+    config = load_config()
 
     active_tf = config.get("data", {}).get("timeframe", "H4").upper()
     st.markdown("---")

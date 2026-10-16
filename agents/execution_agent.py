@@ -29,7 +29,27 @@ class ExecutionAgent:
         if mt5 is None:
             print("[EXECUTION ERROR] MetaTrader5 library not installed.")
             return False
-        if not mt5.initialize():
+
+        mt5_cfg = self.config.get("mt5", {})
+        init_kwargs = {}
+        path = mt5_cfg.get("terminal_path")
+        login = mt5_cfg.get("login")
+        password = mt5_cfg.get("password")
+        server = mt5_cfg.get("server")
+
+        if path:
+            init_kwargs["path"] = str(path)
+        if login:
+            try:
+                init_kwargs["login"] = int(login)
+            except (ValueError, TypeError):
+                pass
+        if password:
+            init_kwargs["password"] = str(password)
+        if server:
+            init_kwargs["server"] = str(server)
+
+        if not mt5.initialize(**init_kwargs):
             print(f"[EXECUTION ERROR] MT5 init failed: {mt5.last_error()}")
             return False
         self.is_connected = True

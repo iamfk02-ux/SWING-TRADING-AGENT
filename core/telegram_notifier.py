@@ -9,17 +9,14 @@ Sends alerts directly to your phone via Telegram Bot:
 
 import requests
 from typing import Dict, Any, Optional
-import yaml
 from pathlib import Path
-
-CONFIG_PATH = Path(__file__).resolve().parent.parent / "config" / "settings.yaml"
+from core.config_loader import load_config
 
 
 class TelegramNotifier:
     def __init__(self, config: Optional[Dict[str, Any]] = None):
-        if config is None and CONFIG_PATH.exists():
-            with open(CONFIG_PATH, "r") as f:
-                config = yaml.safe_load(f)
+        if config is None:
+            config = load_config()
         self.config = config or {}
         tg_cfg = self.config.get("telegram", {})
         self.enabled = tg_cfg.get("enabled", False)

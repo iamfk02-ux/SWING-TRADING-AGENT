@@ -20,8 +20,8 @@ account:
 # ---------------------------------------------------------------------
 telegram:
   enabled: true          # set to true once you fill in bot_token and chat_id
-  bot_token: "8803300097:AAHu8Qb04k1bdEETXoAdLaP97q0mBW804WM"           # get from @BotFather on Telegram (free)
-  chat_id: "1968991910"             # your telegram chat id from @userinfobot (free)
+  bot_token: ""           # Loaded securely from .env (TELEGRAM_BOT_TOKEN)
+  chat_id: ""             # Loaded securely from .env (TELEGRAM_CHAT_ID)
 
 # ---------------------------------------------------------------------
 # ECONOMIC CALENDAR & NEWS SHIELD (ForexFactory integration)
