@@ -317,8 +317,9 @@ with st.sidebar:
     st.subheader("⚙️ Active Bot Profile")
     st.markdown(f"• **Timeframe:** `{active_tf}` ({'4-Hour Swing' if active_tf == 'H4' else '1-Hour Fast'})")
     st.markdown("• **Regime Filter:** `Daily (D1)` (Macro Safety)")
-    st.markdown("• **Order Types:** `Limit & Stop Pending`")
-    st.markdown("• **Pending Expiration:** `24 Hours`")
+    st.markdown("• **Quality Filter:** `A+ Confluence (Score ≥ 0.75)`")
+    st.markdown("• **Target Expectancy:** `Min 2.0R Target`")
+    st.markdown("• **Loss Cooldown:** `24h Churn Lockout`")
     st.markdown("• **Market Hours:** `24/5 Forex & Metals`")
     st.markdown("• **Risk Per Trade:** `1.0% Hard Cap`")
 

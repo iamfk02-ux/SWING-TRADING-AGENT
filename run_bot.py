@@ -234,21 +234,24 @@ def run_cycle(cycle_num: int = 1) -> int:
                             notifier.notify_partial_tp(sym, half_vol, rem_vol, current_price, pnl_usd, be_sl)
                             continue
 
-                # 1B. Standard Break-even if not already moved
+                # 1B. Standard Break-even at +1.0R of profit
+                lower_atr = compute_atr(df_lower, 14).iloc[-1]
+                risk_dist = abs(entry - sl) if (sl > 0 and ((pos["direction"] == "BUY" and sl < entry) or (pos["direction"] == "SELL" and sl > entry))) else (1.2 * lower_atr)
+
                 if pos["direction"] == "BUY":
                     profit_dist = current_price - entry
-                    if profit_dist > (1.5 * d1_atr) and sl < entry:
-                        new_sl = entry + (0.1 * d1_atr)
+                    if profit_dist >= (1.0 * risk_dist) and sl < entry:
+                        new_sl = round(entry + (0.1 * risk_dist), 5)
                         exec_agent.modify_stop_loss(pos["ticket"], new_sl)
-                        append_live_log(f"🎯 [MANAGEMENT] {sym} Stop Loss moved to Break-Even at {new_sl:.5f}")
+                        append_live_log(f"🎯 [MANAGEMENT] {sym} +1.0R reached! Stop Loss moved to Break-Even at {new_sl:.5f}")
                         notifier.notify_breakeven(sym, new_sl)
 
                 elif pos["direction"] == "SELL":
                     profit_dist = entry - current_price
-                    if profit_dist > (1.5 * d1_atr) and (sl > entry or sl == 0):
-                        new_sl = entry - (0.1 * d1_atr)
+                    if profit_dist >= (1.0 * risk_dist) and (sl > entry or sl == 0):
+                        new_sl = round(entry - (0.1 * risk_dist), 5)
                         exec_agent.modify_stop_loss(pos["ticket"], new_sl)
-                        append_live_log(f"🎯 [MANAGEMENT] {sym} Stop Loss moved to Break-Even at {new_sl:.5f}")
+                        append_live_log(f"🎯 [MANAGEMENT] {sym} +1.0R reached! Stop Loss moved to Break-Even at {new_sl:.5f}")
                         notifier.notify_breakeven(sym, new_sl)
 
     # 2. Scan market for new signals across all 3 strategy agents

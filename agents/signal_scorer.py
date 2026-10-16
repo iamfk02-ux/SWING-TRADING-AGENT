@@ -37,7 +37,8 @@ REGIME_FIT_TABLE = {
 class SignalScorer:
     def __init__(self, config: Dict[str, Any]):
         self.config = config
-        self.min_score_threshold = 0.60
+        scorer_cfg = config.get("scorer", {}) if config else {}
+        self.min_score_threshold = scorer_cfg.get("min_score_threshold", 0.75)
 
     def score_signal(
         self,

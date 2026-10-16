@@ -38,12 +38,56 @@ class RiskManager:
         except Exception:
             self.health_monitor = None
 
+        # Symbol Loss Lockout (Post-loss cooldown to prevent churn)
+        self.symbol_loss_cooldown_hours = risk_cfg.get("symbol_loss_cooldown_hours", 24)
+
+    def _check_symbol_loss_cooldown(self, symbol: str) -> Tuple[bool, str]:
+        """
+        Enforces a mandatory cooldown on symbols that recently closed at a loss
+        (e.g. stopped out within the last 24h) to prevent revenge trading and chop churn.
+        """
+        if self.symbol_loss_cooldown_hours <= 0:
+            return False, ""
+        try:
+            import sqlite3
+            from pathlib import Path
+            from datetime import datetime
+            import pandas as pd
+
+            db_path = Path(__file__).resolve().parent.parent / "data" / "trading_journal.db"
+            if not db_path.exists():
+                return False, ""
+
+            with sqlite3.connect(db_path) as conn:
+                cur = conn.cursor()
+                row = cur.execute("""
+                    SELECT exit_time, exit_reason, pnl_usd 
+                    FROM trades 
+                    WHERE UPPER(symbol) = ? AND exit_time IS NOT NULL 
+                    ORDER BY id DESC LIMIT 1
+                """, (symbol.upper(),)).fetchone()
+
+                if row and row[0]:
+                    exit_time_str, exit_reason, pnl_usd = row
+                    exit_dt = pd.to_datetime(exit_time_str)
+                    now_time = pd.to_datetime(datetime.now())
+                    hours_elapsed = max(0.0, (now_time - exit_dt).total_seconds() / 3600.0)
+
+                    if hours_elapsed < self.symbol_loss_cooldown_hours:
+                        is_loss = (pnl_usd is not None and pnl_usd < 0) or ("STOP LOSS" in str(exit_reason).upper())
+                        if is_loss:
+                            hours_left = self.symbol_loss_cooldown_hours - hours_elapsed
+                            return True, f"SYMBOL COOLDOWN ACTIVE: {symbol} had a losing exit ({exit_reason}) {hours_elapsed:.1f}h ago. Standing aside for {hours_left:.1f}h to prevent churn."
+        except Exception:
+            pass
+        return False, ""
+
     def _get_currency_components(self, symbol: str) -> List[str]:
         """Extracts individual currencies from a symbol string."""
         s = symbol.upper().replace(".C", "").replace("M", "").replace(".RAW", "")
         if "XAU" in s or "GOLD" in s or "OIL" in s or "US30" in s:
             return ["USD"]
-        if len(s) >= 6 and not any(c in s for c in ["BTC", "ETH", "SOL"]):
+        if len(s) >= 6:
             return [s[:3], s[3:6]]
         return [s]
 
@@ -120,6 +164,11 @@ class RiskManager:
         for c in candidate_currencies:
             if curr_counts.get(c, 0) >= 2:
                 return False, f"CORRELATION LIMIT: Maximum exposure for currency '{c}' reached ({curr_counts[c]} active/pending)", 0.0
+
+        # 3.8 Symbol Loss Lockout (Post-loss cooldown to prevent churn)
+        is_locked, cooldown_reason = self._check_symbol_loss_cooldown(symbol)
+        if is_locked:
+            return False, cooldown_reason, 0.0
 
         # 4. Effective Risk calculation (Throttled if in drawdown or if strategy is degraded)
         effective_risk_pct = self.risk_pct

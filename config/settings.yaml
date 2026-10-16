@@ -67,7 +67,6 @@ symbols:
     - NZDUSD
     - USDCHF
     - EURGBP
-    - AUDNZD
     - EURJPY
   # Metals: high volatility, active during weekdays
   metals:
@@ -84,6 +83,7 @@ risk:
   max_currency_exposure_pct: 2.0   # net risk on any single currency
   pending_orders_enabled: true     # Use Limit orders on pullbacks & Stop orders on breakouts
   pending_order_expiry_hours: 24   # Auto-cancel pending orders if unfilled after 24 hours (6 H4 candles)
+  symbol_loss_cooldown_hours: 24   # Mandatory 24h lockout after a loss to prevent churn/revenge trading
   daily_loss_limit_pct: 3.0
   weekly_loss_limit_pct: 5.0
   drawdown_throttle_pct: 10.0      # from peak -> risk is halved
@@ -107,6 +107,12 @@ risk:
   # No new forex entries on Friday after this hour (broker server time).
   # Server time is usually UK time + 2 hours, so 18 = 16:00 UK.
   friday_cutoff_server_hour: 18
+
+# ---------------------------------------------------------------------
+# SIGNAL SCORER & QUALITY FILTER
+# ---------------------------------------------------------------------
+scorer:
+  min_score_threshold: 0.75        # High standard: only A+ setups with strong confluence pass
 
 # ---------------------------------------------------------------------
 # MARKET-REGIME AGENT (daily candles)
@@ -140,14 +146,15 @@ strategies:
     atr_period: 14
     pullback_lookback: 5
     max_close_below_slow_atr: 0.5
-    stop_buffer_atr: 0.5
-    min_stop_atr: 1.0
+    stop_buffer_atr: 1.2           # Upgraded from 0.5: 1.2 ATR buffer to survive spread expansion
+    min_stop_atr: 1.2              # Upgraded from 1.0: Minimum 1.2 ATR stop distance
     max_stop_atr: 3.0
-    breakeven_at_r: 1.5
+    target_r: 2.0                  # Upgraded from 1.5: Enforce minimum 2.0R reward-to-risk
+    breakeven_at_r: 1.0            # Move to BE at +1.0R to lock in risk-free trade early
     breakeven_buffer_r: 0.05
     trail_atr_d1: 2.5
     max_hold_days: 42
-    strong_adx: 30
+    strong_adx: 25                 # Upgraded from 30: Confirmed trend threshold
   breakout:
     enabled: true
     donchian_period: 20
