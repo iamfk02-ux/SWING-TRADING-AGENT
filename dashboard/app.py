@@ -353,34 +353,42 @@ try:
 except Exception:
     mt5_active = False
 
-col1, col2, col3, col4 = st.columns(4)
-hb = get_heartbeat()
-if mt5_active:
-    acct = mt5.account_info()
-    if acct:
-        col1.metric("MT5 Account", f"#{acct.login}", "Connected ✅")
-        col2.metric("Account Balance", f"${acct.balance:,.2f}")
-        col3.metric("Live Equity", f"${acct.equity:,.2f}")
-        profit_delta = f"{'+' if acct.profit >= 0 else ''}${acct.profit:,.2f}"
-        col4.metric("Floating P&L", f"${acct.profit:,.2f}", profit_delta)
+@st.fragment(run_every="5s")
+def render_header_metrics():
+    try:
+        import MetaTrader5 as mt5
+        mt5_active = mt5.initialize()
+    except Exception:
+        mt5_active = False
+
+    col1, col2, col3, col4 = st.columns(4)
+    hb = get_heartbeat()
+    if mt5_active:
+        acct = mt5.account_info()
+        if acct:
+            col1.metric("MT5 Account", f"#{acct.login}", "Connected ✅")
+            col2.metric("Account Balance", f"${acct.balance:,.2f}")
+            col3.metric("Live Equity", f"${acct.equity:,.2f}")
+            profit_delta = f"{'+' if acct.profit >= 0 else ''}${acct.profit:,.2f}"
+            col4.metric("Floating P&L", f"${acct.profit:,.2f}", profit_delta)
+        else:
+            col1.metric("MT5 Account", f"#{hb.get('login', 'Active')}", "Syncing 🔄")
+            col2.metric("Account Balance", f"${hb.get('balance', 0):,.2f}")
+            col3.metric("Live Equity", f"${hb.get('equity', 0):,.2f}")
+            col4.metric("Floating P&L", "$0.00")
     else:
-        # Fallback to heartbeat metrics recorded by bot
-        col1.metric("MT5 Account", f"#{hb.get('login', 'Active')}", "Syncing 🔄")
-        col2.metric("Account Balance", f"${hb.get('balance', 0):,.2f}")
-        col3.metric("Live Equity", f"${hb.get('equity', 0):,.2f}")
-        col4.metric("Floating P&L", "$0.00")
-else:
-    # If terminal IPC briefly flickered, check if bot engine is active
-    if hb and hb.get("balance", 0) > 0:
-        col1.warning("MT5 Reconnecting... 🔄")
-        col2.metric("Account Balance", f"${hb.get('balance', 0):,.2f}")
-        col3.metric("Live Equity", f"${hb.get('equity', 0):,.2f}")
-        col4.metric("Floating P&L", "$0.00")
-    else:
-        col1.error("MT5 Terminal: Disconnected")
-        col2.metric("Account Balance", "$0.00")
-        col3.metric("Live Equity", "$0.00")
-        col4.metric("Floating P&L", "$0.00")
+        if hb and hb.get("balance", 0) > 0:
+            col1.warning("MT5 Reconnecting... 🔄")
+            col2.metric("Account Balance", f"${hb.get('balance', 0):,.2f}")
+            col3.metric("Live Equity", f"${hb.get('equity', 0):,.2f}")
+            col4.metric("Floating P&L", "$0.00")
+        else:
+            col1.error("MT5 Terminal: Disconnected")
+            col2.metric("Account Balance", "$0.00")
+            col3.metric("Live Equity", "$0.00")
+            col4.metric("Floating P&L", "$0.00")
+
+render_header_metrics()
 
 st.markdown("---")
 
@@ -398,128 +406,145 @@ tab_monitor, tab_positions, tab_history, tab_news, tab_signals, tab_backtest = s
 
 # TAB 1: LIVE MONITOR & FEED
 with tab_monitor:
-    st.subheader("🔴 Live Market Scanner & Real-Time Bot Feed")
-    st.write("Monitor exactly what the bot is evaluating, its countdown timer, and live activity feed.")
+    @st.fragment(run_every="5s")
+    def render_live_monitor_feed():
+        st.subheader("🔴 Live Market Scanner & Real-Time Bot Feed")
+        curr_time_str = datetime.now().strftime("%I:%M:%S %p")
+        st.caption(f"⏱️ **Live Dashboard Clock:** `{curr_time_str}` (Auto-updating live every 5s)")
 
-    hb_data = get_heartbeat()
+        hb_data = get_heartbeat()
+        is_running = is_bot_running()
 
-    # 1. Live Heartbeat Metrics
-    c_m1, c_m2, c_m3, c_m4 = st.columns(4)
-    with c_m1:
-        if bot_running:
-            pid_val = PID_FILE.read_text().strip() if PID_FILE.exists() else ""
-            st.metric("Bot Status", "ACTIVE & SCANNING", f"Process #{pid_val} 🟢")
-        else:
-            st.metric("Bot Status", "STOPPED", "Idle 🛑")
-
-    with c_m2:
-        sec_tab = 300
-        if bot_running and hb_data:
-            if "next_cycle_time" in hb_data:
-                try:
-                    nxt = datetime.strptime(hb_data["next_cycle_time"], "%Y-%m-%d %H:%M:%S")
-                    sec_tab = max(0, int((nxt - datetime.now()).total_seconds()))
-                except Exception:
-                    sec_tab = hb_data.get("seconds_remaining", 300)
+        # 1. Live Heartbeat Metrics
+        c_m1, c_m2, c_m3, c_m4 = st.columns(4)
+        with c_m1:
+            if is_running:
+                pid_val = PID_FILE.read_text().strip() if PID_FILE.exists() else ""
+                st.metric("Bot Status", "ACTIVE & SCANNING", f"Process #{pid_val} 🟢")
             else:
+                st.metric("Bot Status", "STOPPED", "Idle 🛑")
+
+        with c_m2:
+            sec_tab = 300
+            if is_running and hb_data:
+                if "next_cycle_time" in hb_data:
+                    try:
+                        nxt = datetime.strptime(hb_data["next_cycle_time"], "%Y-%m-%d %H:%M:%S")
+                        sec_tab = max(0, int((nxt - datetime.now()).total_seconds()))
+                    except Exception:
+                        sec_tab = hb_data.get("seconds_remaining", 300)
+                else:
+                    sec_tab = hb_data.get("seconds_remaining", 300)
+            elif hb_data:
                 sec_tab = hb_data.get("seconds_remaining", 300)
-        elif hb_data:
-            sec_tab = hb_data.get("seconds_remaining", 300)
-        render_live_countdown(sec_tab, bot_running, label="Next Market Scan In")
+            render_live_countdown(sec_tab, is_running, label="Next Market Scan In")
 
-    with c_m3:
-        cyc = hb_data.get("cycle_count", 0) if hb_data else 0
-        last_t = hb_data.get("last_cycle_time", "N/A").split(" ")[-1] if hb_data else "N/A"
-        st.metric("Latest Cycle", f"Cycle #{cyc}", f"Finished at {last_t}")
+        with c_m3:
+            cyc = hb_data.get("cycle_count", 0) if hb_data else 0
+            last_t = hb_data.get("last_cycle_time", "N/A").split(" ")[-1] if hb_data else "N/A"
+            st.metric("Latest Cycle", f"Cycle #{cyc}", f"Finished at {last_t}")
 
-    with c_m4:
-        tf_val = hb_data.get("timeframe", "H1") if hb_data else "H1"
-        st.metric("Monitored Timeframe", f"{tf_val} (1-Hour)", "Intraday Pullback Triggers")
+        with c_m4:
+            tf_val = hb_data.get("timeframe", "H4") if hb_data else "H4"
+            tf_label = "4-Hour Swing" if tf_val == "H4" else "1-Hour"
+            st.metric("Monitored Timeframe", f"{tf_val} ({tf_label})", "Macro Safe Triggers")
 
-    col_audit_btn, col_audit_txt = st.columns([1, 2.5])
-    with col_audit_btn:
-        if st.button("⚡ Trigger Immediate Market Scan", type="primary", use_container_width=True):
-            with st.spinner("Analyzing all pairs across the market right now..."):
-                from run_bot import run_cycle
-                done_scanned = run_cycle(cycle_num=999)
-                st.success(f"Audit complete! Analyzed {done_scanned} pairs.")
-                time.sleep(1)
+        col_audit_btn, col_audit_txt = st.columns([1, 2.5])
+        with col_audit_btn:
+            if st.button("⚡ Trigger Immediate Market Scan", type="primary", use_container_width=True, key="btn_trigger_scan"):
+                with st.spinner("Analyzing all pairs across the market right now..."):
+                    from run_bot import run_cycle
+                    done_scanned = run_cycle(cycle_num=999)
+                    st.success(f"Audit complete! Analyzed {done_scanned} pairs.")
+                    time.sleep(1)
+                    st.rerun()
+        with col_audit_txt:
+            st.caption("You don't have to wait for the 5-minute timer. Click above to make the bot evaluate all pairs immediately.")
+
+        st.markdown("---")
+
+        # 2. Live Scanner Matrix
+        st.markdown("#### 🔍 Real-Time Pair Inspection Matrix")
+        st.caption("Here is what the bot is evaluating for every watched pair right now:")
+
+        mat = get_scanner_matrix()
+        if mat and mat.get("pairs"):
+            pairs_data = mat["pairs"]
+            df_mat = pd.DataFrame(pairs_data)
+            df_mat_clean = df_mat[["symbol", "price", "regime", "badge", "details", "last_checked"]].copy()
+            df_mat_clean.columns = ["Symbol", "Live Price", "D1 Macro Regime", "Status", "What the Bot is Seeing / Waiting For", "Time Checked"]
+            st.dataframe(df_mat_clean, use_container_width=True, hide_index=True)
+        else:
+            st.info("No scanner snapshot recorded yet. Click '⚡ Trigger Immediate Market Scan' or start the bot to view live pair inspections.")
+
+        st.markdown("---")
+
+        # 3. Live Console Terminal Stream
+        c_hdr, c_clr = st.columns([3, 1])
+        with c_hdr:
+            st.markdown("#### 📟 Live Console Activity Stream")
+            st.caption("Real-time terminal logs streaming directly from the bot engine:")
+        with c_clr:
+            if st.button("🗑️ Clear Log Feed", key="btn_clear_log"):
+                if LOG_FILE.exists():
+                    LOG_FILE.write_text("")
                 st.rerun()
-    with col_audit_txt:
-        st.caption("You don't have to wait for the 5-minute timer. Click above to make the bot evaluate all pairs immediately.")
 
-    st.markdown("---")
+        terminal_logs = get_live_logs(limit=80)
+        st.text_area("Terminal Output", value=terminal_logs, height=280, disabled=True, label_visibility="collapsed", key="terminal_output_area")
 
-    # 2. Live Scanner Matrix
-    st.markdown("#### 🔍 Real-Time Pair Inspection Matrix")
-    st.caption("Here is what the bot is evaluating for every watched pair right now:")
+    render_live_monitor_feed()
 
-    mat = get_scanner_matrix()
-    if mat and mat.get("pairs"):
-        pairs_data = mat["pairs"]
-        df_mat = pd.DataFrame(pairs_data)
-        df_mat_clean = df_mat[["symbol", "price", "regime", "badge", "details", "last_checked"]].copy()
-        df_mat_clean.columns = ["Symbol", "Live Price", "D1 Macro Regime", "Status", "What the Bot is Seeing / Waiting For", "Time Checked"]
-        st.dataframe(df_mat_clean, use_container_width=True, hide_index=True)
-    else:
-        st.info("No scanner snapshot recorded yet. Click '⚡ Trigger Immediate Market Scan' or start the bot to view live pair inspections.")
-
-    st.markdown("---")
-
-    # 3. Live Console Terminal Stream
-    c_hdr, c_clr = st.columns([3, 1])
-    with c_hdr:
-        st.markdown("#### 📟 Live Console Activity Stream")
-        st.caption("Real-time terminal logs streaming directly from the bot engine:")
-    with c_clr:
-        if st.button("🗑️ Clear Log Feed"):
-            if LOG_FILE.exists():
-                LOG_FILE.write_text("")
-            st.rerun()
-
-    terminal_logs = get_live_logs(limit=80)
-    st.text_area("Terminal Output", value=terminal_logs, height=280, disabled=True, label_visibility="collapsed")
-
-# TAB 1: ACTIVE TRADES
+# TAB 2: ACTIVE TRADES
 with tab_positions:
-    st.subheader("Open Positions in MetaTrader 5")
-    if mt5_active:
-        positions = mt5.positions_get()
-        if positions and len(positions) > 0:
-            df_pos = pd.DataFrame([{
-                "Ticket": p.ticket,
-                "Symbol": p.symbol,
-                "Type": "BUY" if p.type == 0 else "SELL",
-                "Lots": p.volume,
-                "Entry Price": p.price_open,
-                "Current Price": p.price_current,
-                "Stop Loss": p.sl,
-                "Take Profit": p.tp if p.tp > 0 else "Trailing",
-                "Profit ($)": f"${p.profit:,.2f}"
-            } for p in positions])
-            st.dataframe(df_pos, use_container_width=True)
-        else:
-            st.info("No active positions currently running in MT5.")
+    @st.fragment(run_every="5s")
+    def render_open_positions():
+        st.subheader("Open Positions in MetaTrader 5")
+        try:
+            import MetaTrader5 as mt5
+            mt5_is_on = mt5.initialize()
+        except Exception:
+            mt5_is_on = False
 
-        # Pending Orders Section (Limit & Stop Orders)
-        pending_orders = mt5.orders_get()
-        st.markdown("#### ⏳ Pending Orders (Limit & Stop Orders)")
-        if pending_orders and len(pending_orders) > 0:
-            df_pend = pd.DataFrame([{
-                "Ticket": o.ticket,
-                "Symbol": o.symbol,
-                "Type": "BUY LIMIT" if o.type == 2 else ("SELL LIMIT" if o.type == 3 else ("BUY STOP" if o.type == 4 else "SELL STOP")),
-                "Volume": o.volume_initial,
-                "Limit Price": o.price_open,
-                "Stop Loss": o.sl,
-                "Take Profit": o.tp if o.tp > 0 else "Trailing",
-                "Auto Expiration": "24 Hours (Active)"
-            } for o in pending_orders])
-            st.dataframe(df_pend, use_container_width=True)
+        if mt5_is_on:
+            positions = mt5.positions_get()
+            if positions and len(positions) > 0:
+                df_pos = pd.DataFrame([{
+                    "Ticket": p.ticket,
+                    "Symbol": p.symbol,
+                    "Type": "BUY" if p.type == 0 else "SELL",
+                    "Lots": p.volume,
+                    "Entry Price": p.price_open,
+                    "Current Price": p.price_current,
+                    "Stop Loss": p.sl,
+                    "Take Profit": p.tp if p.tp > 0 else "Trailing",
+                    "Profit ($)": f"${p.profit:,.2f}"
+                } for p in positions])
+                st.dataframe(df_pos, use_container_width=True)
+            else:
+                st.info("No active positions currently running in MT5.")
+
+            # Pending Orders Section (Limit & Stop Orders)
+            pending_orders = mt5.orders_get()
+            st.markdown("#### ⏳ Pending Orders (Limit & Stop Orders)")
+            if pending_orders and len(pending_orders) > 0:
+                df_pend = pd.DataFrame([{
+                    "Ticket": o.ticket,
+                    "Symbol": o.symbol,
+                    "Type": "BUY LIMIT" if o.type == 2 else ("SELL LIMIT" if o.type == 3 else ("BUY STOP" if o.type == 4 else "SELL STOP")),
+                    "Volume": o.volume_initial,
+                    "Limit Price": o.price_open,
+                    "Stop Loss": o.sl,
+                    "Take Profit": o.tp if o.tp > 0 else "Trailing",
+                    "Auto Expiration": "24 Hours (Active)"
+                } for o in pending_orders])
+                st.dataframe(df_pend, use_container_width=True)
+            else:
+                st.caption("No pending orders waiting. When a pullback setup forms, the bot places Buy/Sell Limits at optimal discount prices.")
         else:
-            st.caption("No pending orders waiting. When a pullback setup forms, the bot places Buy/Sell Limits at optimal discount prices.")
-    else:
-        st.error("Please ensure your MetaTrader 5 terminal is open.")
+            st.error("Please ensure your MetaTrader 5 terminal is open.")
+
+    render_open_positions()
 
 # TAB 3: CLOSED TRADE HISTORY & REALIZED P&L
 with tab_history:
