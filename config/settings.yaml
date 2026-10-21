@@ -52,7 +52,9 @@ mt5:
 # ---------------------------------------------------------------------
 data:
   source: mt5
-  timeframe: H4      # Institutional Swing Timeframe: "H4" (4-Hour candles) for clean signals
+  timeframe: H4      # Primary Institutional Swing Timeframe: "H4" (4-Hour candles)
+  secondary_timeframe: H1  # Dual-Horizon Momentum Timeframe: "H1" (1-Hour candles)
+  dual_timeframe_scanning: true # Simultaneously monitors both H4 and H1 for setups
   h1_bars: 2000      # ~3 months of 1-hour candles for live scanning
   h4_bars: 1000      # ~6 months of 4-hour candles for live scanning
   d1_bars: 400       # ~1.5 years of daily candles for live scanning

@@ -58,6 +58,13 @@ class MeanReversionAgent:
         curr_bar = df_lower.iloc[-1]
         prev_bar = df_lower.iloc[-2]
 
+        is_h1 = False
+        if len(df_lower) >= 2:
+            delta_sec = (pd.to_datetime(df_lower["timestamp"].iloc[-1]) - pd.to_datetime(df_lower["timestamp"].iloc[-2])).total_seconds()
+            if delta_sec <= 7200:
+                is_h1 = True
+        tf_name = "H1" if is_h1 else "H4"
+
         # -----------------------------
         # LONG MEAN REVERSION
         # -----------------------------
@@ -80,13 +87,14 @@ class MeanReversionAgent:
                     return {
                         "symbol": symbol,
                         "strategy": "MEAN_REVERSION",
+                        "timeframe": tf_name,
                         "direction": "BUY",
                         "entry": float(curr_bar["close"]),
                         "stop_loss": float(sl),
                         "take_profit": float(tp),
                         "confidence": min(1.0, confidence),
                         "regime": current_regime,
-                        "reason": f"D1 Lower BB & RSI({rsi_val:.1f}) bounce targeting mean {tp:.5f}",
+                        "reason": f"D1 Lower BB & RSI({rsi_val:.1f}) bounce on {tf_name} targeting mean {tp:.5f}",
                         "timestamp": str(curr_bar["timestamp"])
                     }
 
@@ -111,13 +119,14 @@ class MeanReversionAgent:
                     return {
                         "symbol": symbol,
                         "strategy": "MEAN_REVERSION",
+                        "timeframe": tf_name,
                         "direction": "SELL",
                         "entry": float(curr_bar["close"]),
                         "stop_loss": float(sl),
                         "take_profit": float(tp),
                         "confidence": min(1.0, confidence),
                         "regime": current_regime,
-                        "reason": f"D1 Upper BB & RSI({rsi_val:.1f}) exhaustion targeting mean {tp:.5f}",
+                        "reason": f"D1 Upper BB & RSI({rsi_val:.1f}) exhaustion on {tf_name} targeting mean {tp:.5f}",
                         "timestamp": str(curr_bar["timestamp"])
                     }
 

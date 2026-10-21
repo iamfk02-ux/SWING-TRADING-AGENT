@@ -311,9 +311,12 @@ with st.sidebar:
     config = load_config()
 
     active_tf = config.get("data", {}).get("timeframe", "H4").upper()
+    sec_tf = config.get("data", {}).get("secondary_timeframe", "H1").upper()
+    dual_on = config.get("data", {}).get("dual_timeframe_scanning", True)
+    tf_display = f"{active_tf} + {sec_tf} (Dual-Horizon: Swing & Momentum)" if dual_on else f"{active_tf} ({'4-Hour Swing' if active_tf == 'H4' else '1-Hour'})"
     st.markdown("---")
     st.subheader("⚙️ Active Bot Profile")
-    st.markdown(f"• **Timeframe:** `{active_tf}` ({'4-Hour Swing' if active_tf == 'H4' else '1-Hour Fast'})")
+    st.markdown(f"• **Timeframe:** `{tf_display}`")
     st.markdown("• **Regime Filter:** `Daily (D1)` (Macro Safety)")
     min_score = config.get("scorer", {}).get("min_score_threshold", 0.70)
     st.markdown(f"• **Quality Filter:** `A+ Confluence (Score ≥ {min_score:.2f})`")
@@ -342,7 +345,8 @@ num_pairs = len(config.get("symbols", {}).get("forex", [])) + len(config.get("sy
 if is_wknd:
     st.info("🕒 **Weekend Mode Active:** Traditional Forex and Metals markets are closed. Scanner is standing by until markets reopen Sunday 5:00 PM EST.")
 else:
-    st.success(f"🟢 **Weekday Market Active:** Actively scanning {num_pairs} Forex & Metals pairs on **{active_tf} ({'4-Hour Swing' if active_tf == 'H4' else '1-Hour'})** candles every 5 minutes.")
+    mode_txt = "Dual-Horizon (H4 Swing + H1 Momentum)" if dual_on else f"{active_tf} ({'4-Hour Swing' if active_tf == 'H4' else '1-Hour'})"
+    st.success(f"🟢 **Weekday Market Active:** Actively scanning {num_pairs} Forex & Metals pairs on **{mode_txt}** candles every 5 minutes.")
 
 try:
     import MetaTrader5 as mt5
@@ -446,8 +450,7 @@ with tab_monitor:
 
         with c_m4:
             tf_val = hb_data.get("timeframe", "H4") if hb_data else "H4"
-            tf_label = "4-Hour Swing" if tf_val == "H4" else "1-Hour"
-            st.metric("Monitored Timeframe", f"{tf_val} ({tf_label})", "Macro Safe Triggers")
+            st.metric("Monitored Horizon", "H4 + H1", "Dual-Horizon Swing & Momentum")
 
         col_audit_btn, col_audit_txt = st.columns([1, 2.5])
         with col_audit_btn:

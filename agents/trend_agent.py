@@ -148,6 +148,7 @@ class TrendAgent:
             return {
                 "symbol": symbol,
                 "strategy": "TREND",
+                "timeframe": tf_name,
                 "direction": "BUY",
                 "order_type": "LIMIT",
                 "entry": float(limit_price),
@@ -233,6 +234,7 @@ class TrendAgent:
             return {
                 "symbol": symbol,
                 "strategy": "TREND",
+                "timeframe": tf_name,
                 "direction": "SELL",
                 "order_type": "LIMIT",
                 "entry": float(limit_price),

@@ -355,43 +355,64 @@ def run_cycle(cycle_num: int = 1) -> int:
         if not actual_sym:
             continue
 
-        df_d1, df_lower = data_agent.get_bars(actual_sym, timeframe=timeframe)
-        if len(df_d1) < 50 or len(df_lower) < 50:
+        dual_scanning = config.get("data", {}).get("dual_timeframe_scanning", True)
+        df_d1, df_h4 = data_agent.get_bars(actual_sym, timeframe="H4")
+        if len(df_d1) < 50 or len(df_h4) < 50:
             continue
+
+        _, df_h1 = data_agent.get_bars(actual_sym, timeframe="H1") if dual_scanning else (None, None)
 
         scanned_count += 1
         d1_regimes = regime_agent.calculate_regime_series(df_d1)
         current_regime = d1_regimes.iloc[-1]
-        curr_price = float(df_lower["close"].iloc[-1])
+        curr_price = float(df_h4["close"].iloc[-1])
         pip_size = 0.01 if "JPY" in actual_sym else (0.1 if "XAU" in actual_sym else 0.0001)
 
-        # Human-readable diagnostics
+        # 1-Position Guard: Check if symbol already has active position or pending order in MT5
+        sym_clean = actual_sym.upper().replace(".C", "").replace("M", "").replace(".RAW", "")
+        already_in_position = any(
+            p["symbol"].upper().replace(".C", "").replace("M", "").replace(".RAW", "") == sym_clean
+            for p in open_positions
+        )
+        already_in_pending = any(
+            o["symbol"].upper().replace(".C", "").replace("M", "").replace(".RAW", "") == sym_clean
+            for o in pending_orders
+        )
+
+        # Human-readable diagnostics across Dual Horizons
         status_text = ""
         action_badge = "WATCHING"
 
-        if current_regime in ["TRENDING_UP", "TRENDING_DOWN"]:
+        if already_in_position:
+            action_badge = "ACTIVE POSITION"
+            status_text = "Trade actively running in MT5. Managing trailing stop & profit targets."
+        elif already_in_pending:
+            action_badge = "PENDING ORDER"
+            status_text = "Pending limit order active in MT5. Waiting for discount fill."
+        elif current_regime in ["TRENDING_UP", "TRENDING_DOWN"]:
             from core.indicators import compute_ema
-            h1_ema_fast = float(compute_ema(df_lower["close"], 20).iloc[-1])
-            pips_diff = abs(curr_price - h1_ema_fast) / pip_size
-            direction_word = "above" if curr_price > h1_ema_fast else "below"
-            pullback_window = df_lower.iloc[-10:-1]
+            h4_ema20 = float(compute_ema(df_h4["close"], 20).iloc[-1])
+            h4_pips = abs(curr_price - h4_ema20) / pip_size
+            h4_dir = "above" if curr_price > h4_ema20 else "below"
             
-            if current_regime == "TRENDING_UP":
-                touched = (pullback_window["low"] <= compute_ema(df_lower["close"], 20).iloc[-10:-1]).any()
-                if touched:
-                    status_text = f"Pullback to EMA20 occurred! Watching for bullish candle trigger close."
-                    action_badge = "PULLBACK DETECTED"
-                else:
-                    status_text = f"Uptrend active. Price is +{pips_diff:.1f} pips {direction_word} EMA20 ({h1_ema_fast:.5f}). Waiting for pullback."
-                    action_badge = "WAITING PULLBACK"
+            pw_h4 = df_h4.iloc[-10:-1]
+            touched_h4 = (pw_h4["low"] <= compute_ema(df_h4["close"], 20).iloc[-10:-1]).any() if current_regime == "TRENDING_UP" else (pw_h4["high"] >= compute_ema(df_h4["close"], 20).iloc[-10:-1]).any()
+
+            touched_h1 = False
+            h1_pips = 0.0
+            if df_h1 is not None and len(df_h1) >= 50:
+                h1_ema20 = float(compute_ema(df_h1["close"], 20).iloc[-1])
+                h1_pips = abs(curr_price - h1_ema20) / pip_size
+                pw_h1 = df_h1.iloc[-15:-1]
+                touched_h1 = (pw_h1["low"] <= compute_ema(df_h1["close"], 20).iloc[-15:-1]).any() if current_regime == "TRENDING_UP" else (pw_h1["high"] >= compute_ema(df_h1["close"], 20).iloc[-15:-1]).any()
+
+            if touched_h4 or touched_h1:
+                action_badge = "PULLBACK DETECTED"
+                tf_ready = "H4 + H1" if (touched_h4 and touched_h1) else ("H4 Swing" if touched_h4 else "H1 Momentum")
+                status_text = f"Pullback active on {tf_ready}! Watching for trigger close (H4: {h4_pips:.1f}p | H1: {h1_pips:.1f}p)."
             else:
-                touched = (pullback_window["high"] >= compute_ema(df_lower["close"], 20).iloc[-10:-1]).any()
-                if touched:
-                    status_text = f"Pullback to EMA20 occurred! Watching for bearish candle trigger close."
-                    action_badge = "PULLBACK DETECTED"
-                else:
-                    status_text = f"Downtrend active. Price is -{pips_diff:.1f} pips {direction_word} EMA20 ({h1_ema_fast:.5f}). Waiting for pullback."
-                    action_badge = "WAITING PULLBACK"
+                action_badge = "WAITING PULLBACK"
+                status_text = f"Trend active. Price {h4_dir} EMA20: H4 ({h4_pips:.1f}p), H1 ({h1_pips:.1f}p). Waiting for pullback."
 
         elif current_regime == "RANGING":
             from core.indicators import compute_rsi, compute_bollinger_bands
@@ -420,22 +441,51 @@ def run_cycle(cycle_num: int = 1) -> int:
             append_live_log(f"⚠️ [{actual_sym}] {cb_reason}", level="WARNING")
             continue
 
-        # Collect candidate signals from each agent
+        # Skip scanning candidate entries if symbol is already in an active trade or pending order
+        if already_in_position or already_in_pending:
+            scanner_matrix_rows.append({
+                "symbol": actual_sym,
+                "price": curr_price,
+                "regime": current_regime,
+                "badge": action_badge,
+                "details": status_text,
+                "last_checked": datetime.now().strftime("%H:%M:%S")
+            })
+            continue
+
+        # Collect candidate signals across both H4 and H1 horizons
         candidate_signals = []
-        
-        # 1. Trend Agent
-        s_trend = trend_agent.scan_for_signal(actual_sym, df_d1, df_lower, current_regime)
-        if s_trend: candidate_signals.append(s_trend)
 
-        # 2. Breakout Agent
+        # 1. H4 Horizon (Swing Strategy)
+        s_trend_h4 = trend_agent.scan_for_signal(actual_sym, df_d1, df_h4, current_regime)
+        if s_trend_h4:
+            s_trend_h4["timeframe"] = "H4"
+            candidate_signals.append(s_trend_h4)
+
+        s_mr_h4 = mean_rev_agent.scan_for_signal(actual_sym, df_d1, df_h4, current_regime)
+        if s_mr_h4:
+            s_mr_h4["timeframe"] = "H4"
+            candidate_signals.append(s_mr_h4)
+
+        # 2. H1 Horizon (Momentum Strategy)
+        if df_h1 is not None and len(df_h1) >= 50:
+            s_trend_h1 = trend_agent.scan_for_signal(actual_sym, df_d1, df_h1, current_regime)
+            if s_trend_h1:
+                s_trend_h1["timeframe"] = "H1"
+                candidate_signals.append(s_trend_h1)
+
+            s_mr_h1 = mean_rev_agent.scan_for_signal(actual_sym, df_d1, df_h1, current_regime)
+            if s_mr_h1:
+                s_mr_h1["timeframe"] = "H1"
+                candidate_signals.append(s_mr_h1)
+
+        # 3. D1 Horizon (Breakout Strategy)
         s_break = breakout_agent.scan_for_signal(actual_sym, df_d1, current_regime)
-        if s_break: candidate_signals.append(s_break)
+        if s_break:
+            s_break["timeframe"] = "D1"
+            candidate_signals.append(s_break)
 
-        # 3. Mean-Reversion Agent
-        s_mr = mean_rev_agent.scan_for_signal(actual_sym, df_d1, df_lower, current_regime)
-        if s_mr: candidate_signals.append(s_mr)
-
-        # Multi-Agent Consensus & Conflict Arbitration (Architecture Layer 4)
+        # Multi-Agent Consensus & Dual-Horizon Conflict Arbitration (Architecture Layer 4)
         if candidate_signals:
             winning_signal, audit_verdict = consensus_engine.arbitrate(actual_sym, candidate_signals)
             append_live_log(f"🤝 [{actual_sym}] Consensus Audit: {audit_verdict}")
@@ -446,7 +496,8 @@ def run_cycle(cycle_num: int = 1) -> int:
                 from core.database import get_symbol_news_modifier
                 news_mod, news_note = get_symbol_news_modifier(actual_sym, signal["direction"])
                 score = scorer.score_signal(signal, news_modifier=news_mod)
-                append_live_log(f"⚡ [{actual_sym}] SETUP DETECTED! Strategy: {signal['strategy']} {signal['direction']} | Final Score: {score:.2f} (News Modifier: {news_mod:.2f} - {news_note})")
+                tf_label = signal.get("timeframe", "H4")
+                append_live_log(f"⚡ [{actual_sym}] SETUP DETECTED! Strategy: {signal['strategy']} on {tf_label} {signal['direction']} | Final Score: {score:.2f} (News Modifier: {news_mod:.2f} - {news_note})")
 
                 if scorer.is_eligible(score):
                     approved, reason, lots = risk_manager.evaluate_order(
@@ -462,37 +513,38 @@ def run_cycle(cycle_num: int = 1) -> int:
                     if approved:
                         action_badge = "🚀 ORDER PLACED"
                         target_entry_txt = f"{signal['entry']:.5f} ({order_type_str})" if order_type_str != "MARKET" else "Market"
-                        append_live_log(f"✅ [{actual_sym}] RISK APPROVED! Placing {order_type_str} {lots} lots @ {target_entry_txt} | SL: {signal['stop_loss']:.5f} | TP: {signal.get('take_profit') or 'Trailing'}")
+                        append_live_log(f"✅ [{actual_sym}] RISK APPROVED! Placing {order_type_str} {lots} lots on {tf_label} @ {target_entry_txt} | SL: {signal['stop_loss']:.5f} | TP: {signal.get('take_profit') or 'Trailing'}")
                         ticket = exec_agent.place_order(
                             symbol=actual_sym,
                             direction=signal["direction"],
                             lots=lots,
                             stop_loss=signal["stop_loss"],
                             take_profit=signal.get("take_profit"),
-                            strategy_name=signal["strategy"],
+                            strategy_name=f"{signal['strategy']}_{tf_label}",
                             order_type_str=order_type_str,
                             entry_price=signal.get("entry"),
                             expiration_hours=expiry_h
                         )
                         if ticket:
                             circuit_breaker.record_execution_success()
-                            append_live_log(f"🎉 [{actual_sym}] Live {order_type_str} Order Placed in MT5! Ticket #{ticket} (Auto-exp: {expiry_h}h)")
+                            append_live_log(f"🎉 [{actual_sym}] Live {order_type_str} ({tf_label}) Order Placed in MT5! Ticket #{ticket} (Auto-exp: {expiry_h}h)")
                             notifier.notify_trade_opened(
                                 symbol=actual_sym,
-                                direction=f"{signal['direction']} ({order_type_str})",
+                                direction=f"{signal['direction']} ({order_type_str} - {tf_label})",
                                 lots=lots,
                                 entry=signal["entry"],
                                 sl=signal["stop_loss"],
                                 tp=signal.get("take_profit"),
-                                strategy=signal["strategy"],
+                                strategy=f"{signal['strategy']} [{tf_label}]",
                                 score=score
                             )
                         else:
-                            # Record execution failure for circuit breaker (Rule 11)
                             tripped = circuit_breaker.record_execution_error("Order placement rejected by MT5 terminal.")
                             if tripped:
                                 append_live_log(f"🚨 [CIRCUIT BREAKER TRIPPED] Order placement halted due to repeated broker rejections.", level="ERROR")
                     else:
+                        action_badge = "⚠️ RISK REJECTED"
+                        append_live_log(f"⚠️ [{actual_sym}] Trade Rejected by Risk Manager: {reason}")
                         action_badge = "⚠️ RISK REJECTED"
                         append_live_log(f"⚠️ [{actual_sym}] Trade Rejected by Risk Manager: {reason}")
 
