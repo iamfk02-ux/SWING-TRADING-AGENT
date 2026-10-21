@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 
 NEWS_CACHE_FILE = Path(__file__).resolve().parent.parent / "data" / "economic_calendar_cache.json"
+NEWS_ALERTED_FILE = Path(__file__).resolve().parent.parent / "data" / "news_alerted_history.json"
 CACHE_EXPIRY_HOURS = 12
 
 
@@ -24,8 +25,30 @@ class NewsGuard:
         self.blackout_minutes_after = news_cfg.get("blackout_minutes_after", 30)
         self.advance_alert_minutes = news_cfg.get("advance_alert_minutes", 30)
         self.events: List[Dict[str, Any]] = []
-        self.alerted_events = set()
+        self.alerted_events: Dict[str, float] = self._load_alerted_history()
         self._load_or_fetch_events()
+
+    def _load_alerted_history(self) -> Dict[str, float]:
+        """Loads persistently stored alert IDs from disk and prunes items older than 48 hours."""
+        if NEWS_ALERTED_FILE.exists():
+            try:
+                with open(NEWS_ALERTED_FILE, "r") as f:
+                    data = json.load(f)
+                    if isinstance(data, dict):
+                        now_ts = datetime.now(timezone.utc).timestamp()
+                        return {k: v for k, v in data.items() if (now_ts - v) < 172800}
+            except Exception:
+                pass
+        return {}
+
+    def _save_alerted_history(self):
+        """Saves alerted event IDs to disk to prevent duplicate notifications across scan cycles."""
+        try:
+            NEWS_ALERTED_FILE.parent.mkdir(parents=True, exist_ok=True)
+            with open(NEWS_ALERTED_FILE, "w") as f:
+                json.dump(self.alerted_events, f, indent=2)
+        except Exception:
+            pass
 
     def _load_or_fetch_events(self):
         """Loads events from disk cache or fetches fresh JSON from ForexFactory feed."""
@@ -174,4 +197,6 @@ class NewsGuard:
         return event_id in self.alerted_events
 
     def mark_event_alerted(self, event_id: str):
-        self.alerted_events.add(event_id)
+        now_ts = datetime.now(timezone.utc).timestamp()
+        self.alerted_events[event_id] = now_ts
+        self._save_alerted_history()

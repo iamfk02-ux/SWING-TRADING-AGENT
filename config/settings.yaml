@@ -115,7 +115,7 @@ risk:
 # SIGNAL SCORER & QUALITY FILTER
 # ---------------------------------------------------------------------
 scorer:
-  min_score_threshold: 0.75        # High standard: only A+ setups with strong confluence pass
+  min_score_threshold: 0.70        # Adjusted standard: only A+ setups with strong confluence pass (0.70+)
 
 # ---------------------------------------------------------------------
 # MARKET-REGIME AGENT (daily candles)

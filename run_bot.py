@@ -210,11 +210,27 @@ def run_cycle(cycle_num: int = 1) -> int:
             advance_window = news_cfg.get("advance_alert_minutes", 30)
             upcoming_events = news_guard.get_upcoming_high_impact_events(advance_window)
 
-            for event in upcoming_events:
-                ev_id = event["id"]
-                ev_curr = event["country"]
-                ev_title = event["title"]
-                mins_left = event["minutes_until"]
+            # Group events by (country, date) into single release clusters to prevent multiple notifications
+            clusters = {}
+            for ev in upcoming_events:
+                cluster_key = f"{ev['country']}_{ev['date']}"
+                if cluster_key not in clusters:
+                    clusters[cluster_key] = {
+                        "currency": ev["country"],
+                        "date": ev["date"],
+                        "minutes_until": ev["minutes_until"],
+                        "titles": [ev["title"]],
+                        "ids": [ev["id"]]
+                    }
+                else:
+                    if ev["title"] not in clusters[cluster_key]["titles"]:
+                        clusters[cluster_key]["titles"].append(ev["title"])
+                    clusters[cluster_key]["ids"].append(ev["id"])
+
+            for cluster_key, cluster in clusters.items():
+                ev_curr = cluster["currency"]
+                combined_title = " + ".join(cluster["titles"])
+                mins_left = cluster["minutes_until"]
 
                 # Find active positions matching this currency
                 affected_positions = []
@@ -225,20 +241,23 @@ def run_cycle(cycle_num: int = 1) -> int:
 
                 affected_syms = [p["symbol"] for p in affected_positions]
 
-                # Priority Advance Telegram Alert (sent once per event)
-                if not news_guard.is_event_alerted(ev_id):
-                    news_guard.mark_event_alerted(ev_id)
+                # Priority Advance Telegram Alert (sent strictly once per news release cluster)
+                if not news_guard.is_event_alerted(cluster_key):
+                    news_guard.mark_event_alerted(cluster_key)
+                    for eid in cluster["ids"]:
+                        news_guard.mark_event_alerted(eid)
+
                     action_desc = f"New entries on {ev_curr} frozen (30m blackout window)."
                     if affected_syms:
                         action_desc += f" Protecting open positions ({', '.join(affected_syms)}) against spread widening."
                     notifier.notify_news_shield_warning(
-                        event_title=ev_title,
+                        event_title=combined_title,
                         currency=ev_curr,
                         minutes_until=mins_left,
                         affected_positions=affected_syms,
                         shield_action=action_desc
                     )
-                    append_live_log(f"🚨 [NEWS SHIELD ALERT] {ev_title} ({ev_curr}) in ~{mins_left}m! Active positions affected: {affected_syms or 'None'}")
+                    append_live_log(f"🚨 [NEWS SHIELD ALERT] {combined_title} ({ev_curr}) in ~{mins_left}m! Active positions affected: {affected_syms or 'None'}")
 
                 # Automated Position Defense: If in profit (>= +0.5R), secure Stop Loss to Break-Even
                 if news_cfg.get("auto_breakeven_before_news", True):

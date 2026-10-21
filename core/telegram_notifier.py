@@ -124,18 +124,27 @@ class TelegramNotifier:
         affected_positions: list,
         shield_action: str
     ):
-        pos_text = ", ".join(affected_positions) if affected_positions else "None (No active exposure)"
-        msg = (
-            f"⚠️ *HIGH-IMPACT NEWS SHIELD ALERT*\n"
-            f"━━━━━━━━━━━━━━━━━━\n"
-            f"📅 *Event:* {event_title}\n"
-            f"🌍 *Currency:* `{currency}`\n"
-            f"⏳ *Time Until Release:* ~{minutes_until} Minutes\n"
-            f"⚡ *Expected Volatility:* High / Spread Spikes\n"
-            f"🎯 *Active Positions Affected:* `{pos_text}`\n"
-            f"🛡️ *Action Taken:* {shield_action}\n"
-            f"━━━━━━━━━━━━━━━━━━"
-        )
+        if affected_positions:
+            pos_text = ", ".join(affected_positions)
+            msg = (
+                f"🛡️ *NEWS SHIELD: {currency} HIGH-IMPACT*\n"
+                f"━━━━━━━━━━━━━━━━━━\n"
+                f"📅 *Event:* {event_title}\n"
+                f"⏳ *Release:* In ~{minutes_until} mins\n"
+                f"🎯 *Guarded Trades:* `{pos_text}` (SL Protected)\n"
+                f"🚫 *Entries:* Paused for 30m blackout\n"
+                f"━━━━━━━━━━━━━━━━━━"
+            )
+        else:
+            msg = (
+                f"📰 *NEWS HEADS-UP: {currency}*\n"
+                f"━━━━━━━━━━━━━━━━━━\n"
+                f"📅 *Event:* {event_title}\n"
+                f"⏳ *Release:* In ~{minutes_until} mins\n"
+                f"🔒 *Exposure:* Clean (0 open trades)\n"
+                f"🚫 *Entries:* Paused for 30m blackout\n"
+                f"━━━━━━━━━━━━━━━━━━"
+            )
         self.send_message(msg)
 
     def notify_news_shield_protected(
