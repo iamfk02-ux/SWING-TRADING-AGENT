@@ -97,10 +97,19 @@ class ExecutionAgent:
         
         if order_type_str.upper() == "LIMIT":
             action = mt5.TRADE_ACTION_PENDING
-            mt5_order_type = mt5.ORDER_TYPE_BUY_LIMIT if direction == "BUY" else mt5.ORDER_TYPE_SELL_LIMIT
+            if direction == "BUY":
+                mt5_order_type = mt5.ORDER_TYPE_BUY_LIMIT if target_price <= market_price else mt5.ORDER_TYPE_BUY_STOP
+            else:
+                mt5_order_type = mt5.ORDER_TYPE_SELL_LIMIT if target_price >= market_price else mt5.ORDER_TYPE_SELL_STOP
         elif order_type_str.upper() == "STOP":
             action = mt5.TRADE_ACTION_PENDING
-            mt5_order_type = mt5.ORDER_TYPE_BUY_STOP if direction == "BUY" else mt5.ORDER_TYPE_SELL_STOP
+            # MT5 Order Protocol:
+            # BUY above market = BUY_STOP; BUY below market = BUY_LIMIT
+            # SELL below market = SELL_STOP; SELL above market = SELL_LIMIT
+            if direction == "BUY":
+                mt5_order_type = mt5.ORDER_TYPE_BUY_STOP if target_price >= market_price else mt5.ORDER_TYPE_BUY_LIMIT
+            else:
+                mt5_order_type = mt5.ORDER_TYPE_SELL_STOP if target_price <= market_price else mt5.ORDER_TYPE_SELL_LIMIT
         else:
             action = mt5.TRADE_ACTION_DEAL
             mt5_order_type = mt5.ORDER_TYPE_BUY if direction == "BUY" else mt5.ORDER_TYPE_SELL

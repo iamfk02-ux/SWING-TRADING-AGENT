@@ -235,10 +235,14 @@ class RiskManager:
 
         # Check maximum safety threshold (hard limit 2.5% of account on minimum lot)
         # Prevent oversized fills on very small cent balances
-        pip_size = 0.01 if "JPY" in symbol else 0.0001
-        stop_pips = stop_dist / pip_size
-        pip_val_per_lot = 10.0 if not self.is_cent_account else 0.10
-        actual_risk_usd = rounded_lots * stop_pips * pip_val_per_lot
+        if "cost_per_lot" not in locals() or cost_per_lot <= 0:
+            if "XAU" in symbol or "GOLD" in symbol:
+                cost_per_lot = stop_dist * 100.0
+            else:
+                pip_sz = 0.01 if "JPY" in symbol else 0.0001
+                cost_per_lot = (stop_dist / pip_sz) * (10.0 if not self.is_cent_account else 0.10)
+
+        actual_risk_usd = rounded_lots * cost_per_lot
         if actual_risk_usd > (account_equity * 0.025):
             return False, f"MIN LOT TOO LARGE FOR ACCOUNT (${actual_risk_usd:.2f} > 2.5% max risk cap)", 0.0
 
