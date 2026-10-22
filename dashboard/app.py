@@ -11,7 +11,7 @@ All-in-One Trading Bot Application with Live Heartbeat and Interactive Controls:
 import streamlit as st
 import sqlite3
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import yaml
 import time
@@ -340,7 +340,7 @@ with st.sidebar:
 st.title("Trading Bot — Command Center")
 
 # Live market banner
-is_wknd = datetime.utcnow().weekday() in (5, 6)
+is_wknd = datetime.now(timezone.utc).weekday() in (5, 6)
 num_pairs = len(config.get("symbols", {}).get("forex", [])) + len(config.get("symbols", {}).get("metals", []))
 if is_wknd:
     st.info("🕒 **Weekend Mode Active:** Traditional Forex and Metals markets are closed. Scanner is standing by until markets reopen Sunday 5:00 PM EST.")
@@ -653,13 +653,13 @@ with tab_news:
 
             if submitted_bias:
                 b_val = 1 if "Bullish" in bias_stance else (-1 if "Bearish" in bias_stance else 0)
-                expiry_dt = (datetime.utcnow() + timedelta(days=bias_days)).isoformat()
+                expiry_dt = (datetime.now(timezone.utc) + timedelta(days=bias_days)).isoformat()
                 with sqlite3.connect(DB_PATH) as conn:
                     cur = conn.cursor()
                     cur.execute("""
                         INSERT INTO news_bias (created_at, asset, bias, expires_at, note)
                         VALUES (?, ?, ?, ?, ?)
-                    """, (datetime.utcnow().isoformat(), bias_curr, b_val, expiry_dt, bias_note or "Manual input"))
+                    """, (datetime.now(timezone.utc).isoformat(), bias_curr, b_val, expiry_dt, bias_note or "Manual input"))
                     conn.commit()
                 st.success(f"✅ Set {bias_curr} to {bias_stance} for {bias_days} days!")
                 st.rerun()
@@ -714,13 +714,13 @@ with tab_news:
                     st.markdown(f"**AI Recommendation:** `{ai_res['verdict']}`")
                     st.write(f"💡 {ai_res['advice']}")
                     if st.button(f"⚡ Apply '{ai_res['verdict']}' to {h_curr}", key="btn_apply_ai_headline", type="primary"):
-                        exp_dt = (datetime.utcnow() + timedelta(days=3)).isoformat()
+                        exp_dt = (datetime.now(timezone.utc) + timedelta(days=3)).isoformat()
                         with sqlite3.connect(DB_PATH) as conn:
                             cur = conn.cursor()
                             cur.execute("""
                                 INSERT INTO news_bias (created_at, asset, bias, expires_at, note)
                                 VALUES (?, ?, ?, ?, ?)
-                            """, (datetime.utcnow().isoformat(), h_curr, ai_res["bias"], exp_dt, f"AI Headline: {h_text[:50]}..."))
+                            """, (datetime.now(timezone.utc).isoformat(), h_curr, ai_res["bias"], exp_dt, f"AI Headline: {h_text[:50]}..."))
                             conn.commit()
                         st.success(f"Applied {ai_res['verdict']} to {h_curr}!")
                         st.rerun()

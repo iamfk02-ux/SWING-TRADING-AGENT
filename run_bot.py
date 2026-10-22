@@ -13,7 +13,7 @@ Runs the full multi-agent pipeline:
 import time
 import sys
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 import yaml
 
@@ -107,7 +107,7 @@ def run_cycle(cycle_num: int = 1) -> int:
     circuit_breaker = CircuitBreaker(config)
 
     # Weekend vs Weekday portfolio selection
-    is_weekend = datetime.utcnow().weekday() in (5, 6)
+    is_weekend = datetime.now(timezone.utc).weekday() in (5, 6)
     forex_syms = config.get("symbols", {}).get("forex", [])
     metal_syms = config.get("symbols", {}).get("metals", [])
 
@@ -119,7 +119,23 @@ def run_cycle(cycle_num: int = 1) -> int:
         append_live_log(f"🟢 Market Active: Scanning {len(symbols_to_scan)} symbols across Forex and Metals.")
 
     open_positions = exec_agent.get_open_positions()
-    pending_orders = exec_agent.get_pending_orders()
+    raw_pending_orders = exec_agent.get_pending_orders()
+
+    # 0A. Clean up stale pending orders older than configured expiry (default: 24h)
+    expiry_hours = config.get("risk", {}).get("pending_order_expiry_hours", 24)
+    pending_orders = []
+    current_time_sec = time.time()
+    for pend in raw_pending_orders:
+        setup_time = pend.get("time_setup", 0)
+        if setup_time > 0 and (current_time_sec - setup_time) > (expiry_hours * 3600):
+            ticket = pend["ticket"]
+            p_sym = pend.get("symbol", "")
+            age_h = (current_time_sec - setup_time) / 3600.0
+            if exec_agent.cancel_pending_order(ticket):
+                append_live_log(f"⏰ [EXPIRED PENDING ORDER] Cancelled #{ticket} on {p_sym} (Age: {age_h:.1f}h > {expiry_hours}h limit).")
+                continue
+        pending_orders.append(pend)
+
     append_live_log(f"Active MT5 Positions: {len(open_positions)} | Pending Orders: {len(pending_orders)}")
 
     notifier = TelegramNotifier(config)
@@ -155,10 +171,12 @@ def run_cycle(cycle_num: int = 1) -> int:
                             exit_time = datetime.fromtimestamp(matching_deal.time).isoformat()
                             comment = matching_deal.comment or ""
                             
-                            # Determine exit reason
-                            if "sl" in comment.lower() or abs(exit_price - (t_sl or 0)) < 0.0005:
+                            # Determine exit reason with instrument-specific pip scale tolerance
+                            sym_pip = 0.01 if "JPY" in t_sym else (0.1 if "XAU" in t_sym else 0.0001)
+                            tol = 2.0 * sym_pip
+                            if "sl" in comment.lower() or abs(exit_price - (t_sl or 0)) <= tol:
                                 exit_reason = "STOP LOSS HIT"
-                            elif "tp" in comment.lower() or (t_tp and abs(exit_price - t_tp) < 0.0005):
+                            elif "tp" in comment.lower() or (t_tp and abs(exit_price - t_tp) <= tol):
                                 exit_reason = "TAKE PROFIT HIT"
                             else:
                                 exit_reason = f"CLOSED ({comment})" if comment else "CLOSED"
@@ -345,6 +363,30 @@ def run_cycle(cycle_num: int = 1) -> int:
                         exec_agent.modify_stop_loss(pos["ticket"], new_sl)
                         append_live_log(f"🎯 [MANAGEMENT] {sym} +1.0R reached! Stop Loss moved to Break-Even at {new_sl:.5f}")
                         notifier.notify_breakeven(sym, new_sl)
+
+                # 1C. Dynamic Chandelier Trailing Stop (Locks in multi-R gains)
+                # Once trade achieves >= 1.5R, trail SL behind current price by 1.5 * lower_atr
+                sym_info = mt5.symbol_info(sym)
+                sym_digits = sym_info.digits if (sym_info and sym_info.digits is not None) else 5
+                sym_pip = 0.01 if "JPY" in sym else (0.1 if "XAU" in sym else 0.0001)
+
+                profit_dist = (current_price - entry) if pos["direction"] == "BUY" else (entry - current_price)
+                if profit_dist >= (1.5 * risk_dist):
+                    trail_dist = 1.5 * lower_atr
+                    min_step = 2.0 * sym_pip  # Require at least 2 pips ratchet to avoid broker micro-requests
+
+                    if pos["direction"] == "BUY":
+                        trail_candidate = round(current_price - trail_dist, sym_digits)
+                        if trail_candidate > (sl + min_step) and trail_candidate > entry:
+                            if exec_agent.modify_stop_loss(pos["ticket"], trail_candidate):
+                                locked_r = round((trail_candidate - entry) / risk_dist, 2)
+                                append_live_log(f"📈 [TRAILING STOP] {sym} BUY: Stop Loss ratcheted up to {trail_candidate:.5f} (Locking in +{locked_r}R profit)")
+                    elif pos["direction"] == "SELL":
+                        trail_candidate = round(current_price + trail_dist, sym_digits)
+                        if (sl == 0 or trail_candidate < (sl - min_step)) and trail_candidate < entry:
+                            if exec_agent.modify_stop_loss(pos["ticket"], trail_candidate):
+                                locked_r = round((entry - trail_candidate) / risk_dist, 2)
+                                append_live_log(f"📉 [TRAILING STOP] {sym} SELL: Stop Loss ratcheted down to {trail_candidate:.5f} (Locking in +{locked_r}R profit)")
 
     # 2. Scan market for new signals across all 3 strategy agents
     scanned_count = 0

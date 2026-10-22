@@ -10,7 +10,7 @@ Communicates directly with MetaTrader 5 terminal:
 from typing import Dict, Any, List, Optional, Tuple
 from pathlib import Path
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timezone
 
 try:
     import MetaTrader5 as mt5
@@ -115,8 +115,14 @@ class ExecutionAgent:
             mt5_order_type = mt5.ORDER_TYPE_BUY if direction == "BUY" else mt5.ORDER_TYPE_SELL
             target_price = market_price
 
-        # Fetch filling mode supported by broker
+        # Fetch filling mode and digits supported by broker
         symbol_info = mt5.symbol_info(symbol)
+        digits = symbol_info.digits if (symbol_info and symbol_info.digits is not None) else 5
+        target_price = round(target_price, digits)
+        stop_loss = round(stop_loss, digits)
+        if take_profit is not None:
+            take_profit = round(take_profit, digits)
+
         filling_type = mt5.ORDER_FILLING_IOC
         if symbol_info:
             if symbol_info.filling_mode & 1:  # FOK
@@ -179,12 +185,16 @@ class ExecutionAgent:
             return False
 
         pos = position[0]
+        sym_info = mt5.symbol_info(pos.symbol)
+        digits = sym_info.digits if (sym_info and sym_info.digits is not None) else 5
+        sl_val = round(new_sl, digits) if new_sl is not None else float(pos.sl)
+        tp_val = round(new_tp, digits) if new_tp is not None else float(pos.tp)
         request = {
             "action": mt5.TRADE_ACTION_SLTP,
             "position": ticket,
             "symbol": pos.symbol,
-            "sl": float(new_sl) if new_sl is not None else float(pos.sl),
-            "tp": float(new_tp) if new_tp is not None else float(pos.tp)
+            "sl": float(sl_val),
+            "tp": float(tp_val)
         }
         res = mt5.order_send(request)
         return res is not None and res.retcode == mt5.TRADE_RETCODE_DONE
@@ -208,13 +218,23 @@ class ExecutionAgent:
         close_type = mt5.ORDER_TYPE_SELL if pos.type == mt5.ORDER_TYPE_BUY else mt5.ORDER_TYPE_BUY
         price = tick.bid if pos.type == mt5.ORDER_TYPE_BUY else tick.ask
 
-        # Check volume step
+        # Check volume step and broker filling mode
         info = mt5.symbol_info(sym)
+        digits = info.digits if (info and info.digits is not None) else 5
         lot_step = info.volume_step if (info and info.volume_step > 0) else 0.01
         min_lot = info.volume_min if (info and info.volume_min > 0) else 0.01
 
         vol = round(lots_to_close / lot_step) * lot_step
         vol = round(max(min_lot, min(vol, pos.volume)), 2)
+
+        filling_type = mt5.ORDER_FILLING_IOC
+        if info:
+            if info.filling_mode & 1:  # FOK
+                filling_type = mt5.ORDER_FILLING_FOK
+            elif info.filling_mode & 2:  # IOC
+                filling_type = mt5.ORDER_FILLING_IOC
+            else:
+                filling_type = mt5.ORDER_FILLING_RETURN
 
         request = {
             "action": mt5.TRADE_ACTION_DEAL,
@@ -222,12 +242,12 @@ class ExecutionAgent:
             "symbol": sym,
             "volume": float(vol),
             "type": close_type,
-            "price": float(price),
+            "price": float(round(price, digits)),
             "deviation": 20,
             "magic": 10102026,
             "comment": "AGENT_PARTIAL_TP",
             "type_time": mt5.ORDER_TIME_GTC,
-            "type_filling": mt5.ORDER_FILLING_IOC
+            "type_filling": filling_type
         }
         res = mt5.order_send(request)
         if res and res.retcode == mt5.TRADE_RETCODE_DONE:
@@ -284,7 +304,8 @@ class ExecutionAgent:
                 "price": o.price_open,
                 "sl": o.sl,
                 "tp": o.tp,
-                "magic": o.magic
+                "magic": o.magic,
+                "time_setup": getattr(o, "time_setup", 0)
             })
         return ord_list
 
@@ -309,6 +330,6 @@ class ExecutionAgent:
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 ticket, symbol, strategy, "LIVE", direction, lots,
-                datetime.utcnow().isoformat(), price, sl, tp, 0.0
+                datetime.now(timezone.utc).isoformat(), price, sl, tp, 0.0
             ))
             conn.commit()

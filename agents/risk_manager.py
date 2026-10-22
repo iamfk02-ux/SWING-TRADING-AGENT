@@ -11,6 +11,7 @@ Enforces hard safety boundaries:
 """
 
 from typing import Dict, Any, List, Optional, Tuple
+from datetime import datetime, timezone
 
 
 class RiskManager:
@@ -117,12 +118,25 @@ class RiskManager:
                 ts = pd.to_datetime(signal["timestamp"])
                 is_weekend = ts.weekday() in (5, 6)
             except Exception:
-                is_weekend = datetime.utcnow().weekday() in (5, 6)
+                is_weekend = datetime.now(timezone.utc).weekday() in (5, 6)
         else:
-            is_weekend = datetime.utcnow().weekday() in (5, 6)
+            is_weekend = datetime.now(timezone.utc).weekday() in (5, 6)
 
         if is_weekend:
             return False, f"WEEKEND: {symbol} market is closed. Traditional markets resume Sunday 5:00 PM EST.", 0.0
+
+        # 0.2 Spread & Liquidity Filter (Protects against midnight rollover spread widening)
+        stop_dist = abs(signal["entry"] - signal["stop_loss"])
+        try:
+            import MetaTrader5 as mt5
+            t_info = mt5.symbol_info_tick(symbol)
+            if t_info and t_info.ask > 0 and t_info.bid > 0 and stop_dist > 0:
+                live_spread = t_info.ask - t_info.bid
+                max_spread_ratio = self.config.get("risk", {}).get("max_spread_to_stop_ratio", 0.15)
+                if live_spread > (stop_dist * max_spread_ratio):
+                    return False, f"SPREAD TOO WIDE: Spread ({live_spread:.5f}) is > {max_spread_ratio*100:.0f}% of stop distance ({stop_dist:.5f})", 0.0
+        except Exception:
+            pass
 
         # 0.5 High-Impact News Filter (Economic Calendar Shield)
         if self.news_guard:

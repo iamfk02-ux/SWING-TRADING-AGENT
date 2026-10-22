@@ -6,7 +6,7 @@ Uses SQLite for zero-configuration, robust local persistence.
 import sqlite3
 from pathlib import Path
 from typing import Dict, Any, List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 DB_PATH = Path(__file__).resolve().parent.parent / "data" / "trading_journal.db"
@@ -114,7 +114,7 @@ def log_signal(signal: Dict[str, Any], db_path: Path = DB_PATH) -> int:
                 take_profit, confidence, regime, score, status, rejection_reason, details_json
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
-            signal.get('timestamp', datetime.utcnow().isoformat()),
+            signal.get('timestamp', datetime.now(timezone.utc).isoformat()),
             signal['symbol'],
             signal['strategy'],
             signal['direction'],
@@ -140,7 +140,7 @@ def get_symbol_news_modifier(symbol: str, direction: str, db_path: Path = DB_PAT
     if not db_path.exists():
         return 1.0, "Neutral"
     try:
-        now_iso = datetime.utcnow().isoformat()
+        now_iso = datetime.now(timezone.utc).isoformat()
         with sqlite3.connect(db_path) as conn:
             cur = conn.cursor()
             rows = cur.execute("""
