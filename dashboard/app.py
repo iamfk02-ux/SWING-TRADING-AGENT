@@ -578,13 +578,16 @@ with tab_history:
                 # Summary metrics
                 total_pnl = df_closed["Profit ($)"].sum()
                 win_count = len(df_closed[df_closed["Profit ($)"] > 0])
-                loss_count = len(df_closed[df_closed["Profit ($)"] <= 0])
-                win_rate = (win_count / len(df_closed)) * 100.0 if len(df_closed) > 0 else 0.0
+                loss_count = len(df_closed[df_closed["Profit ($)"] < 0])
+                be_count = len(df_closed[df_closed["Profit ($)"] == 0])
+                decided_trades = win_count + loss_count
+                win_rate = (win_count / decided_trades) * 100.0 if decided_trades > 0 else 0.0
 
                 c_h1, c_h2, c_h3, c_h4 = st.columns(4)
                 c_h1.metric("Closed Trades", len(df_closed))
                 c_h2.metric("Net Realized Profit", f"${total_pnl:+,.2f}", f"{'+' if total_pnl >= 0 else ''}${total_pnl:,.2f}")
-                c_h3.metric("Win Rate", f"{win_rate:.1f}%", f"{win_count} Wins / {loss_count} Losses")
+                sub_label = f"{win_count} Wins / {loss_count} Losses" if be_count == 0 else f"{win_count} Wins / {loss_count} Losses ({be_count} BE)"
+                c_h3.metric("Win Rate", f"{win_rate:.1f}%", sub_label)
                 c_h4.metric("Avg Trade P&L", f"${(total_pnl / len(df_closed)):+,.2f}")
 
                 st.markdown("---")
