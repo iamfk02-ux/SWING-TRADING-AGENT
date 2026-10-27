@@ -170,6 +170,10 @@ def run_cycle(cycle_num: int = 1) -> int:
                             profit_usd = matching_deal.profit
                             exit_time = datetime.fromtimestamp(matching_deal.time).isoformat()
                             comment = matching_deal.comment or ""
+
+                            # Sanity filter against broker feed glitches (e.g. timestamp leaked as exit price)
+                            if t_entry and (exit_price > 5.0 * t_entry or exit_price < 0.2 * t_entry):
+                                exit_price = t_entry
                             
                             # Determine exit reason with instrument-specific pip scale tolerance
                             sym_pip = 0.01 if "JPY" in t_sym else (0.1 if "XAU" in t_sym else 0.0001)
@@ -178,15 +182,22 @@ def run_cycle(cycle_num: int = 1) -> int:
                                 exit_reason = "STOP LOSS HIT"
                             elif "tp" in comment.lower() or (t_tp and abs(exit_price - t_tp) <= tol):
                                 exit_reason = "TAKE PROFIT HIT"
+                            elif "so" in comment.lower():
+                                exit_reason = f"STOP OUT / GLITCH ({comment})"
                             else:
                                 exit_reason = f"CLOSED ({comment})" if comment else "CLOSED"
 
                             # Calculate R multiple
                             r_risk = abs(t_entry - t_sl) if t_sl else 0.0001
-                            pnl_r = round((exit_price - t_entry) / r_risk if t_dir == "BUY" else (t_entry - exit_price) / r_risk, 2)
+                            if abs(profit_usd) < 0.01:
+                                pnl_r = 0.0
+                            else:
+                                pnl_r = round((exit_price - t_entry) / r_risk if t_dir == "BUY" else (t_entry - exit_price) / r_risk, 2)
 
                             # Generate Post-Trade Analysis Report
-                            if profit_usd < 0:
+                            if abs(profit_usd) < 0.01:
+                                analysis_text = f"Trade closed at break-even ($0.00 PnL). Exit reason: {exit_reason}. Capital fully intact."
+                            elif profit_usd < 0:
                                 analysis_text = (
                                     f"Trade was stopped out at `{exit_price:.5f}`. Market experienced a pullback/spread expansion past the dynamic ATR stop buffer (`{t_sl:.5f}`). "
                                     f"Capital was strictly protected to initial 1% risk cap."
