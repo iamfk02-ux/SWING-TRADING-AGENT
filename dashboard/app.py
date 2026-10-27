@@ -646,20 +646,6 @@ with tab_history:
             else:
                 st.info("No closed trades recorded yet.")
 
-    st.markdown("---")
-    with st.expander("ℹ️ How 4-Hour (H4) Swing Scanning & Pending Orders Work", expanded=False):
-        st.markdown("""
-        ### ⚡ Faster Trade Opportunities with 1-Hour (H1) Scanning
-        - **Why we added H1 scanning:** Waiting for 4-Hour (H4) or Daily setups can take days or even weeks.
-        - **How it works:** The bot uses the **Daily (D1)** chart for macro trend & market regime direction, while scanning **1-Hour (H1)** candles every 5 minutes to catch intraday pullback entry triggers.
-        - **Result:** You get **4x more trade setups** every week while keeping the strict protection of the Daily macro trend!
-
-        ---
-
-        ### 🌍 Market Hours (24/5 Execution)
-        - **Forex & Gold (XAUUSD):** Markets open Sunday 5:00 PM EST and close Friday 5:00 PM EST.
-        - **Weekend Protocol:** The scanner automatically stands down when markets are closed and resumes scanning automatically when trading sessions reopen Sunday afternoon.
-        """)
 
 # TAB 2: HUMAN NEWS DESK
 with tab_news:
