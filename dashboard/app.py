@@ -566,6 +566,7 @@ with tab_history:
                     lots AS 'Lots',
                     entry_price AS 'Entry Price',
                     exit_price AS 'Exit Price',
+                    entry_time AS 'Entry Time',
                     exit_time AS 'Closed At',
                     exit_reason AS 'Exit Trigger',
                     pnl_usd AS 'Profit ($)',
@@ -577,26 +578,68 @@ with tab_history:
             """, conn)
             
             if not df_closed.empty:
-                # Summary metrics
-                total_pnl = df_closed["Profit ($)"].sum()
-                win_count = len(df_closed[df_closed["Profit ($)"] > 0])
-                loss_count = len(df_closed[df_closed["Profit ($)"] < 0])
-                be_count = len(df_closed[df_closed["Profit ($)"] == 0])
+                # Format datetime columns cleanly
+                df_closed['Exit Date'] = pd.to_datetime(df_closed['Closed At'], format='ISO8601', utc=True).dt.strftime('%Y-%m-%d %H:%M')
+                df_closed['Entry Date'] = pd.to_datetime(df_closed['Entry Time'], format='ISO8601', utc=True).dt.strftime('%Y-%m-%d %H:%M')
+                df_closed['Date'] = pd.to_datetime(df_closed['Closed At'], format='ISO8601', utc=True).dt.strftime('%Y-%m-%d')
+
+                # Period Tracker / Filter
+                f_col1, f_col2 = st.columns([2, 1])
+                with f_col1:
+                    period_options = ["All Time", "Today", "Past 7 Days", "Past 14 Days", "Past 30 Days"]
+                    selected_period = st.selectbox("📅 Filter by Period / Date Range:", period_options, index=0)
+
+                now_utc = pd.Timestamp.now(tz='UTC')
+                filtered_df = df_closed.copy()
+                if selected_period == "Today":
+                    today_str = now_utc.strftime('%Y-%m-%d')
+                    filtered_df = df_closed[df_closed['Date'] == today_str]
+                elif selected_period == "Past 7 Days":
+                    cutoff = (now_utc - pd.Timedelta(days=7)).strftime('%Y-%m-%d')
+                    filtered_df = df_closed[df_closed['Date'] >= cutoff]
+                elif selected_period == "Past 14 Days":
+                    cutoff = (now_utc - pd.Timedelta(days=14)).strftime('%Y-%m-%d')
+                    filtered_df = df_closed[df_closed['Date'] >= cutoff]
+                elif selected_period == "Past 30 Days":
+                    cutoff = (now_utc - pd.Timedelta(days=30)).strftime('%Y-%m-%d')
+                    filtered_df = df_closed[df_closed['Date'] >= cutoff]
+
+                # Summary metrics for selected period
+                total_pnl = filtered_df["Profit ($)"].sum() if not filtered_df.empty else 0.0
+                win_count = len(filtered_df[filtered_df["Profit ($)"] > 0])
+                loss_count = len(filtered_df[filtered_df["Profit ($)"] < 0])
+                be_count = len(filtered_df[filtered_df["Profit ($)"] == 0])
                 decided_trades = win_count + loss_count
                 win_rate = (win_count / decided_trades) * 100.0 if decided_trades > 0 else 0.0
 
                 c_h1, c_h2, c_h3, c_h4 = st.columns(4)
-                c_h1.metric("Closed Trades", len(df_closed))
+                c_h1.metric("Closed Trades", len(filtered_df))
                 c_h2.metric("Net Realized Profit", f"${total_pnl:+,.2f}", f"{'+' if total_pnl >= 0 else ''}${total_pnl:,.2f}")
                 sub_label = f"{win_count} Wins / {loss_count} Losses" if be_count == 0 else f"{win_count} Wins / {loss_count} Losses ({be_count} BE)"
                 c_h3.metric("Win Rate", f"{win_rate:.1f}%", sub_label)
-                c_h4.metric("Avg Trade P&L", f"${(total_pnl / len(df_closed)):+,.2f}")
+                avg_pnl = (total_pnl / len(filtered_df)) if len(filtered_df) > 0 else 0.0
+                c_h4.metric("Avg Trade P&L", f"${avg_pnl:+,.2f}")
+
+                # Daily Breakdown Expander
+                with st.expander("📊 Daily Performance Breakdown (Track Profit & Loss by Day)", expanded=True):
+                    daily_summary = df_closed.groupby('Date').apply(lambda g: pd.Series({
+                        'Trades': int(len(g)),
+                        'Wins': int(len(g[g['Profit ($)'] > 0])),
+                        'Losses': int(len(g[g['Profit ($)'] < 0])),
+                        'Net Realized ($)': f"${g['Profit ($)'].sum():+,.2f}"
+                    }), include_groups=False).reset_index().sort_values('Date', ascending=False)
+                    st.dataframe(daily_summary, use_container_width=True, hide_index=True)
 
                 st.markdown("---")
                 st.markdown("#### Detailed Trade Log")
 
-                # Format profit column for display
-                df_display = df_closed.copy()
+                # Format columns for display with Date upfront
+                display_cols = [
+                    'Exit Date', 'Entry Date', 'Symbol', 'Type', 'Lots', 
+                    'Entry Price', 'Exit Price', 'Profit ($)', 'Return (R)', 
+                    'Exit Trigger', 'Post-Trade Analysis'
+                ]
+                df_display = filtered_df[display_cols].copy()
                 df_display["Profit ($)"] = df_display["Profit ($)"].apply(lambda x: f"${x:+,.2f}" if pd.notnull(x) else "$0.00")
                 df_display["Return (R)"] = df_display["Return (R)"].apply(lambda x: f"{x:+.2f}R" if pd.notnull(x) else "-")
                 st.dataframe(df_display, use_container_width=True, hide_index=True)
