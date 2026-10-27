@@ -631,18 +631,33 @@ with tab_history:
                     st.dataframe(daily_summary, use_container_width=True, hide_index=True)
 
                 st.markdown("---")
-                st.markdown("#### Detailed Trade Log")
-
-                # Format columns for display with Date upfront
-                display_cols = [
-                    'Exit Date', 'Entry Date', 'Symbol', 'Type', 'Lots', 
-                    'Entry Price', 'Exit Price', 'Profit ($)', 'Return (R)', 
-                    'Exit Trigger', 'Post-Trade Analysis'
+                
+                # Simplified default columns with custom reveal filter
+                all_available_cols = [
+                    "Date", "Symbol", "Type", "Lots", "Profit ($)", "Exit Trigger",
+                    "Exit Date", "Entry Price", "Exit Price", "Return (R)", "Post-Trade Analysis"
                 ]
-                df_display = filtered_df[display_cols].copy()
+                default_cols = ["Date", "Symbol", "Type", "Lots", "Profit ($)", "Exit Trigger"]
+
+                c_log_title, c_log_filter = st.columns([1.2, 2.8])
+                with c_log_title:
+                    st.markdown("#### Trade Log")
+                with c_log_filter:
+                    chosen_cols = st.multiselect(
+                        "👁️ Customize Visible Columns:",
+                        options=all_available_cols,
+                        default=default_cols,
+                        help="Default is a clean, simplified view. Pick extra columns (Entry/Exit Price, Return R, Exit Date, Notes) to reveal them."
+                    )
+
+                df_display = filtered_df.copy()
                 df_display["Profit ($)"] = df_display["Profit ($)"].apply(lambda x: f"${x:+,.2f}" if pd.notnull(x) else "$0.00")
                 df_display["Return (R)"] = df_display["Return (R)"].apply(lambda x: f"{x:+.2f}R" if pd.notnull(x) else "-")
-                st.dataframe(df_display, use_container_width=True, hide_index=True)
+                df_display["Entry Price"] = df_display["Entry Price"].apply(lambda x: f"{x:.5f}" if pd.notnull(x) else "-")
+                df_display["Exit Price"] = df_display["Exit Price"].apply(lambda x: f"{x:.5f}" if pd.notnull(x) else "-")
+
+                cols_to_render = [c for c in chosen_cols if c in df_display.columns] if chosen_cols else default_cols
+                st.dataframe(df_display[cols_to_render], use_container_width=True, hide_index=True)
             else:
                 st.info("No closed trades recorded yet.")
 
