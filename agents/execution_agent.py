@@ -269,6 +269,9 @@ class ExecutionAgent:
 
         pos_list = []
         for p in positions:
+            # Strictly filter for bot trades (magic number 10102026) to ignore all manual trades
+            if getattr(p, "magic", 0) != 10102026:
+                continue
             pos_list.append({
                 "ticket": p.ticket,
                 "symbol": p.symbol,
@@ -293,6 +296,9 @@ class ExecutionAgent:
 
         ord_list = []
         for o in orders:
+            # Strictly filter for bot pending orders (magic number 10102026) to ignore all manual orders
+            if getattr(o, "magic", 0) != 10102026:
+                continue
             is_buy = o.type in (mt5.ORDER_TYPE_BUY_LIMIT, mt5.ORDER_TYPE_BUY_STOP)
             ord_type = "LIMIT" if o.type in (mt5.ORDER_TYPE_BUY_LIMIT, mt5.ORDER_TYPE_SELL_LIMIT) else "STOP"
             ord_list.append({

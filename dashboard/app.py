@@ -510,7 +510,8 @@ with tab_positions:
             mt5_is_on = False
 
         if mt5_is_on:
-            positions = mt5.positions_get()
+            raw_positions = mt5.positions_get()
+            positions = [p for p in raw_positions if getattr(p, "magic", 0) == 10102026] if raw_positions else []
             if positions and len(positions) > 0:
                 df_pos = pd.DataFrame([{
                     "Ticket": p.ticket,
@@ -525,10 +526,11 @@ with tab_positions:
                 } for p in positions])
                 st.dataframe(df_pos, use_container_width=True)
             else:
-                st.info("No active positions currently running in MT5.")
+                st.info("No active bot positions currently running in MT5.")
 
             # Pending Orders Section (Limit & Stop Orders)
-            pending_orders = mt5.orders_get()
+            raw_orders = mt5.orders_get()
+            pending_orders = [o for o in raw_orders if getattr(o, "magic", 0) == 10102026] if raw_orders else []
             st.markdown("#### ⏳ Pending Orders (Limit & Stop Orders)")
             if pending_orders and len(pending_orders) > 0:
                 df_pend = pd.DataFrame([{
@@ -543,7 +545,7 @@ with tab_positions:
                 } for o in pending_orders])
                 st.dataframe(df_pend, use_container_width=True)
             else:
-                st.caption("No pending orders waiting. When a pullback setup forms, the bot places Buy/Sell Limits at optimal discount prices.")
+                st.caption("No pending bot orders waiting. When a pullback setup forms, the bot places Buy/Sell Limits at optimal discount prices.")
         else:
             st.error("Please ensure your MetaTrader 5 terminal is open.")
 

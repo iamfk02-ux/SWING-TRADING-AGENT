@@ -158,7 +158,7 @@ def run_cycle(cycle_num: int = 1) -> int:
                 closed_deals = mt5.history_deals_get(from_date, to_date)
                 
                 if closed_deals:
-                    deal_map = {d.position_id: d for d in closed_deals if d.entry == 1} # exit deals indexed by position ticket
+                    deal_map = {d.position_id: d for d in closed_deals if d.entry == 1 and getattr(d, "magic", 0) == 10102026} # exit deals indexed by bot position ticket
                     
                     for row in open_db_trades:
                         db_id, t_ticket, t_sym, t_dir, t_lots, t_entry, t_sl, t_tp, t_strat = row
