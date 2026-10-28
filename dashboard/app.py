@@ -667,6 +667,9 @@ with tab_news:
     st.subheader("🛡️ Automated News Shield & Fundamental Bias")
     st.caption("Protect your trades from unpredictable news volatility and guide the bot's direction with your macro views.")
 
+    import importlib
+    import core.news_assistant
+    importlib.reload(core.news_assistant)
     from core.news_assistant import get_upcoming_economic_events, analyze_news_snippet
     from core.database import delete_news_bias, clear_all_news_biases
 

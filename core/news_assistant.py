@@ -14,12 +14,13 @@ from typing import List, Dict, Any
 CACHE_FILE = Path(__file__).resolve().parent.parent / "data" / "economic_calendar_cache.json"
 
 
-def get_upcoming_economic_events(force_refresh: bool = False) -> List[Dict[str, Any]]:
+def get_upcoming_economic_events(*args, **kwargs) -> List[Dict[str, Any]]:
     """
     Fetches the global economic calendar from ForexFactory feed or persistent cache.
     Includes Tier-1 super-events (FOMC, NFP, CPI, Rates), High and Medium impact releases.
     Falls back reliably to disk cache to prevent rate-limit 429 drops.
     """
+    force_refresh = kwargs.get("force_refresh", False) or (args[0] if len(args) > 0 else False)
     from core.news_guard import NewsGuard
     guard = NewsGuard()
 
