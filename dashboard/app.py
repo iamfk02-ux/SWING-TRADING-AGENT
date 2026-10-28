@@ -736,20 +736,70 @@ with tab_news:
     # RIGHT COLUMN: LIVE CALENDAR & PRE-NEWS SHIELD
     # ---------------------------------------------------------
     with col_calendar:
-        st.markdown("#### 📅 Live High-Impact Calendar")
-        st.info("🛡️ **Automated News Shield Active:** New entries on affected currencies are paused 30m before & after Red Folder releases. Open positions in profit (≥ +0.5R) are automatically locked to Break-Even.")
+        st.markdown("#### 📅 Live Economic Calendar & News Shield")
+        st.info(
+            "🛡️ **Automated News Shield Active:**\n\n"
+            "• **🔥 Tier-1 Super-Shield (FOMC, NFP, CPI, Rate Decisions):** 120m blackout before & after releases.\n"
+            "• **🔴 High-Impact Releases:** 60m blackout before & after releases.\n"
+            "• **🛡️ Automated Defense:** In-profit trades (≥ +0.5R) are auto-moved to Break-Even."
+        )
 
-        events = get_upcoming_economic_events()
+        cal_ctrl1, cal_ctrl2, cal_ctrl3 = st.columns([1.2, 1.2, 0.7])
+        with cal_ctrl1:
+            impact_filter = st.selectbox(
+                "Filter Events:",
+                ["🔥 Tier-1 & High Only", "🔥 Tier-1 Super-Events Only", "All Scheduled (High & Medium)"],
+                key="cal_impact_filter"
+            )
+        with cal_ctrl2:
+            time_filter = st.selectbox(
+                "Time Window:",
+                ["All Week", "Today & Upcoming Only"],
+                key="cal_time_filter"
+            )
+        with cal_ctrl3:
+            st.write("")
+            refresh_cal = st.button("🔄 Sync", key="btn_sync_cal", use_container_width=True, help="Force refresh from ForexFactory feed")
+
+        events = get_upcoming_economic_events(force_refresh=refresh_cal)
         if events:
             df_ev = pd.DataFrame(events)
-            st.dataframe(
-                df_ev[["country", "title", "impact", "date", "forecast", "previous"]],
-                use_container_width=True,
-                height=260,
-                hide_index=True
-            )
+
+            # Apply Impact Filter
+            if impact_filter == "🔥 Tier-1 Super-Events Only":
+                df_ev = df_ev[df_ev["is_tier1"] == True]
+            elif impact_filter == "🔥 Tier-1 & High Only":
+                df_ev = df_ev[(df_ev["is_tier1"] == True) | (df_ev["raw_impact"] == "High")]
+
+            # Apply Time Filter
+            if time_filter == "Today & Upcoming Only":
+                today_start_ts = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0).timestamp()
+                df_ev = df_ev[df_ev["sort_ts"] >= today_start_ts]
+
+            # Rename columns for clear presentation
+            rename_map = {
+                "country": "Currency",
+                "title": "Release / Event",
+                "impact": "Tier / Impact",
+                "date": "Scheduled (UTC)",
+                "status": "Shield Status",
+                "forecast": "Forecast",
+                "previous": "Previous"
+            }
+            display_cols = ["Currency", "Release / Event", "Tier / Impact", "Scheduled (UTC)", "Shield Status", "Forecast", "Previous"]
+            df_display_cal = df_ev.rename(columns=rename_map)
+
+            if not df_display_cal.empty:
+                st.dataframe(
+                    df_display_cal[display_cols],
+                    use_container_width=True,
+                    height=280,
+                    hide_index=True
+                )
+            else:
+                st.info("No events match the selected filters.")
         else:
-            st.caption("No high-impact events scheduled for the current session.")
+            st.caption("No economic events found in calendar feed.")
 
         st.markdown("---")
         with st.expander("🧠 Quick Headline AI Impact Analyzer (Paste News Text)", expanded=False):

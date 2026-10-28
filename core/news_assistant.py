@@ -7,38 +7,126 @@ Economic News & AI Assistant Module:
 
 import json
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import List, Dict, Any
 
+CACHE_FILE = Path(__file__).resolve().parent.parent / "data" / "economic_calendar_cache.json"
 
-def get_upcoming_economic_events() -> List[Dict[str, Any]]:
+
+def get_upcoming_economic_events(force_refresh: bool = False) -> List[Dict[str, Any]]:
     """
-    Fetches the live global economic calendar (ForexFactory feed)
-    Filtered down to High and Medium impact events.
+    Fetches the global economic calendar from ForexFactory feed or persistent cache.
+    Includes Tier-1 super-events (FOMC, NFP, CPI, Rates), High and Medium impact releases.
+    Falls back reliably to disk cache to prevent rate-limit 429 drops.
     """
-    url = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
-    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-    try:
-        with urllib.request.urlopen(req, timeout=10) as response:
-            events = json.loads(response.read().decode("utf-8"))
-            
-            # Filter for meaningful market-moving events
-            filtered = []
-            for e in events:
-                impact = e.get("impact", "")
-                if impact in ["High", "Medium"]:
-                    filtered.append({
-                        "country": e.get("country", ""),
-                        "title": e.get("title", ""),
-                        "impact": impact,
-                        "date": e.get("date", ""),
-                        "forecast": e.get("forecast", "-"),
-                        "previous": e.get("previous", "-")
-                    })
-            return filtered
-    except Exception as e:
-        print(f"[CALENDAR ERROR] Could not fetch economic calendar: {e}")
-        return []
+    from core.news_guard import NewsGuard
+    guard = NewsGuard()
+
+    events = []
+    # 1. If cache exists and not forcing refresh, try loading from cache first (fresh up to 6h)
+    if not force_refresh and CACHE_FILE.exists():
+        try:
+            mod_time = datetime.fromtimestamp(CACHE_FILE.stat().st_mtime, tz=timezone.utc)
+            now = datetime.now(timezone.utc)
+            if (now - mod_time).total_seconds() < 21600:  # 6 hours
+                with open(CACHE_FILE, "r") as f:
+                    events = json.load(f)
+        except Exception:
+            pass
+
+    # 2. If no cached events or forcing refresh, fetch from live feed
+    if not events:
+        url = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        try:
+            with urllib.request.urlopen(req, timeout=10) as response:
+                data = json.loads(response.read().decode("utf-8"))
+                if isinstance(data, list) and len(data) > 0:
+                    events = data
+                    CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+                    with open(CACHE_FILE, "w") as f:
+                        json.dump(data, f, indent=2)
+        except Exception as e:
+            # Fallback to existing disk cache if remote has 429 cooldown or timeout
+            if CACHE_FILE.exists():
+                try:
+                    with open(CACHE_FILE, "r") as f:
+                        events = json.load(f)
+                except Exception:
+                    pass
+
+    # Filter and categorize events
+    now = datetime.now(timezone.utc)
+    filtered = []
+    for e in events:
+        impact = str(e.get("impact", "")).capitalize()
+        title = e.get("title", "")
+        is_tier1 = guard.is_tier1_event(title)
+
+        # Include all High/Medium impact events, plus any Tier-1 events
+        if impact in ["High", "Medium"] or is_tier1:
+            date_str = e.get("date", "")
+            formatted_date = date_str
+            status_text = "Scheduled"
+            sort_ts = 0.0
+
+            if date_str:
+                try:
+                    dt = datetime.fromisoformat(date_str).astimezone(timezone.utc)
+                    sort_ts = dt.timestamp()
+                    formatted_date = dt.strftime("%b %d, %H:%M UTC")
+                    diff_m = (dt - now).total_seconds() / 60.0
+
+                    if is_tier1:
+                        if 0 <= diff_m <= guard.tier1_blackout_minutes_before:
+                            status_text = f"🛡️ Shield Active (In {int(diff_m)}m)"
+                        elif -guard.tier1_blackout_minutes_after <= diff_m < 0:
+                            status_text = f"🛡️ Shield Active ({int(abs(diff_m))}m ago)"
+                        elif diff_m > guard.tier1_blackout_minutes_before:
+                            hrs = int(diff_m / 60)
+                            status_text = f"In {hrs}h" if hrs > 1 else f"In {int(diff_m)}m"
+                        else:
+                            hrs_ago = int(abs(diff_m) / 60)
+                            status_text = f"Passed ({hrs_ago}h ago)" if hrs_ago > 1 else f"Passed ({int(abs(diff_m))}m ago)"
+                    else:
+                        if 0 <= diff_m <= guard.blackout_minutes_before:
+                            status_text = f"🛡️ Shield Active (In {int(diff_m)}m)"
+                        elif -guard.blackout_minutes_after <= diff_m < 0:
+                            status_text = f"🛡️ Shield Active ({int(abs(diff_m))}m ago)"
+                        elif diff_m > guard.blackout_minutes_before:
+                            hrs = int(diff_m / 60)
+                            status_text = f"In {hrs}h" if hrs > 1 else f"In {int(diff_m)}m"
+                        else:
+                            hrs_ago = int(abs(diff_m) / 60)
+                            status_text = f"Passed ({hrs_ago}h ago)" if hrs_ago > 1 else f"Passed ({int(abs(diff_m))}m ago)"
+                except Exception:
+                    pass
+
+            if is_tier1:
+                impact_label = "🔥 Tier-1 Super-Shield"
+            elif impact == "High":
+                impact_label = "🔴 High Impact"
+            else:
+                impact_label = "🟡 Medium Impact"
+
+            filtered.append({
+                "country": e.get("country", ""),
+                "title": title,
+                "impact": impact_label,
+                "raw_impact": impact,
+                "is_tier1": is_tier1,
+                "date": formatted_date,
+                "iso_date": date_str,
+                "sort_ts": sort_ts,
+                "status": status_text,
+                "forecast": e.get("forecast", "-") or "-",
+                "previous": e.get("previous", "-") or "-"
+            })
+
+    # Sort chronologically by date
+    filtered.sort(key=lambda x: x["sort_ts"])
+    return filtered
 
 
 def analyze_news_snippet(text: str, currency: str) -> Dict[str, Any]:
