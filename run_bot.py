@@ -276,7 +276,10 @@ def run_cycle(cycle_num: int = 1) -> int:
                     for eid in cluster["ids"]:
                         news_guard.mark_event_alerted(eid)
 
-                    action_desc = f"New entries on {ev_curr} frozen (30m blackout window)."
+                    is_any_tier1 = any(news_guard.is_tier1_event(t) for t in cluster["titles"])
+                    buffer_mins = news_guard.tier1_blackout_minutes_before if is_any_tier1 else news_guard.blackout_minutes_before
+                    tier_str = "Tier-1 Super-Shield" if is_any_tier1 else "High-Impact"
+                    action_desc = f"New entries on {ev_curr} frozen ({buffer_mins}m {tier_str} blackout window)."
                     if affected_syms:
                         action_desc += f" Protecting open positions ({', '.join(affected_syms)}) against spread widening."
                     notifier.notify_news_shield_warning(
@@ -310,8 +313,8 @@ def run_cycle(cycle_num: int = 1) -> int:
                             if needs_be:
                                 be_sl = round(entry + (0.05 * risk_dist), 5) if p["direction"] == "BUY" else round(entry - (0.05 * risk_dist), 5)
                                 exec_agent.modify_stop_loss(p["ticket"], be_sl)
-                                append_live_log(f"🛡️ [NEWS SHIELD] Position {sym} secured ahead of '{ev_title}'! Stop Loss moved to Break-Even at {be_sl:.5f}")
-                                notifier.notify_news_shield_protected(sym, ev_title, be_sl)
+                                append_live_log(f"🛡️ [NEWS SHIELD] Position {sym} secured ahead of '{combined_title}'! Stop Loss moved to Break-Even at {be_sl:.5f}")
+                                notifier.notify_news_shield_protected(sym, combined_title, be_sl)
 
                 # Auto-cancel pending orders on affected currency to prevent bad fills/slippage
                 if news_cfg.get("cancel_pending_before_news", True):
@@ -319,7 +322,7 @@ def run_cycle(cycle_num: int = 1) -> int:
                         p_sym = pend.get("symbol", "").upper().replace(".C", "").replace("M", "").replace(".RAW", "")
                         if ev_curr in p_sym or ("XAU" in p_sym and ev_curr == "USD"):
                             exec_agent.cancel_pending_order(pend["ticket"])
-                            append_live_log(f"🚫 [NEWS SHIELD] Cancelled pending order #{pend['ticket']} on {pend.get('symbol')} ahead of '{ev_title}' to prevent slippage.")
+                            append_live_log(f"🚫 [NEWS SHIELD] Cancelled pending order #{pend['ticket']} on {pend.get('symbol')} ahead of '{combined_title}' to prevent slippage.")
         except Exception as e:
             append_live_log(f"News Shield check error: {e}", level="WARNING")
 

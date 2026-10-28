@@ -28,9 +28,11 @@ telegram:
 # ---------------------------------------------------------------------
 news:
   enabled: true                    # Automatically blocks trades during high-impact news
-  blackout_minutes_before: 30      # Minutes before high-impact release to pause entries
-  blackout_minutes_after: 30       # Minutes after high-impact release to pause entries
-  advance_alert_minutes: 30        # Minutes before high-impact release to send priority Telegram alert
+  blackout_minutes_before: 60      # Minutes before standard high-impact release to pause entries (increased from 30)
+  blackout_minutes_after: 60       # Minutes after standard high-impact release to pause entries (increased from 30)
+  advance_alert_minutes: 60        # Minutes before high-impact release to send priority Telegram alert
+  tier1_blackout_minutes_before: 120 # Minutes before Tier-1 super-events (FOMC, NFP, CPI, Rate Decisions) to pause entries
+  tier1_blackout_minutes_after: 120  # Minutes after Tier-1 release to pause entries (covers press conferences & volatility absorption)
   auto_breakeven_before_news: true # Automatically move SL to BE on in-profit trades (>= +0.5R) before news
   cancel_pending_before_news: true # Automatically cancel pending orders on affected currency to avoid slippage
 

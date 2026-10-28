@@ -17,16 +17,51 @@ CACHE_EXPIRY_HOURS = 12
 
 
 class NewsGuard:
+    TIER1_KEYWORDS = [
+        "FOMC",
+        "FEDERAL FUNDS",
+        "FED FUNDS",
+        "INTEREST RATE",
+        "POLICY RATE",
+        "CASH RATE",
+        "OVERNIGHT RATE",
+        "REFINANCING RATE",
+        "RATE STATEMENT",
+        "RATE DECISION",
+        "MONETARY POLICY",
+        "PRESS CONFERENCE",
+        "NON-FARM",
+        "NONFARM",
+        "NFP",
+        "CPI",
+        "PCE PRICE INDEX",
+        "INFLATION",
+        "GDP",
+        "POWELL",
+        "LAGARDE",
+        "BAILEY",
+        "UEDA",
+    ]
+
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         self.config = config or {}
         news_cfg = self.config.get("news", {})
         self.enabled = news_cfg.get("enabled", True)
-        self.blackout_minutes_before = news_cfg.get("blackout_minutes_before", 30)
-        self.blackout_minutes_after = news_cfg.get("blackout_minutes_after", 30)
-        self.advance_alert_minutes = news_cfg.get("advance_alert_minutes", 30)
+        self.blackout_minutes_before = news_cfg.get("blackout_minutes_before", 60)
+        self.blackout_minutes_after = news_cfg.get("blackout_minutes_after", 60)
+        self.tier1_blackout_minutes_before = news_cfg.get("tier1_blackout_minutes_before", 120)
+        self.tier1_blackout_minutes_after = news_cfg.get("tier1_blackout_minutes_after", 120)
+        self.advance_alert_minutes = news_cfg.get("advance_alert_minutes", 60)
         self.events: List[Dict[str, Any]] = []
         self.alerted_events: Dict[str, float] = self._load_alerted_history()
         self._load_or_fetch_events()
+
+    def is_tier1_event(self, title: str) -> bool:
+        """Determines if a release is an ultra-high-volatility Tier-1 central bank or macroeconomic shock event."""
+        if not title:
+            return False
+        t_upper = title.upper()
+        return any(kw in t_upper for kw in self.TIER1_KEYWORDS)
 
     def _load_alerted_history(self) -> Dict[str, float]:
         """Loads persistently stored alert IDs from disk and prunes items older than 48 hours."""
@@ -138,15 +173,21 @@ class NewsGuard:
 
             time_diff_mins = (ev_time_utc - now).total_seconds() / 60.0
 
-            # If event is upcoming within the next X minutes:
-            if 0 <= time_diff_mins <= self.blackout_minutes_before:
-                mins = int(time_diff_mins)
-                return True, f"HIGH-IMPACT NEWS: '{ev.get('title')}' ({event_currency}) in {mins}m"
+            title = str(ev.get("title", ""))
+            is_tier1 = self.is_tier1_event(title)
+            limit_before = self.tier1_blackout_minutes_before if is_tier1 else self.blackout_minutes_before
+            limit_after = self.tier1_blackout_minutes_after if is_tier1 else self.blackout_minutes_after
+            tier_tag = "TIER-1 SUPER-SHIELD" if is_tier1 else "HIGH-IMPACT NEWS"
 
-            # If event occurred within the past Y minutes:
-            if -self.blackout_minutes_after <= time_diff_mins < 0:
+            # If event is upcoming within the safety buffer:
+            if 0 <= time_diff_mins <= limit_before:
+                mins = int(time_diff_mins)
+                return True, f"{tier_tag}: '{title}' ({event_currency}) in {mins}m ({limit_before}m blackout)"
+
+            # If event occurred within the safety buffer:
+            if -limit_after <= time_diff_mins < 0:
                 mins_ago = int(abs(time_diff_mins))
-                return True, f"HIGH-IMPACT NEWS: '{ev.get('title')}' ({event_currency}) released {mins_ago}m ago"
+                return True, f"{tier_tag}: '{title}' ({event_currency}) released {mins_ago}m ago ({limit_after}m blackout)"
 
         return False, None
 
@@ -157,7 +198,7 @@ class NewsGuard:
         if not self.enabled or not self.events:
             return []
 
-        window = window_minutes or self.advance_alert_minutes
+        base_window = window_minutes or self.advance_alert_minutes
         now = datetime.now(timezone.utc)
         upcoming = []
 
@@ -177,9 +218,12 @@ class NewsGuard:
 
             time_diff_mins = (ev_time_utc - now).total_seconds() / 60.0
 
-            if 0 <= time_diff_mins <= window:
+            title = str(ev.get("title", ""))
+            is_tier1 = self.is_tier1_event(title)
+            effective_window = max(base_window, self.tier1_blackout_minutes_before) if is_tier1 else base_window
+
+            if 0 <= time_diff_mins <= effective_window:
                 country = str(ev.get("country", "")).upper()
-                title = str(ev.get("title", ""))
                 event_id = f"{country}_{title}_{date_str}"
                 upcoming.append({
                     "id": event_id,
@@ -188,7 +232,8 @@ class NewsGuard:
                     "date": date_str,
                     "minutes_until": max(1, int(time_diff_mins)),
                     "forecast": ev.get("forecast", "-"),
-                    "previous": ev.get("previous", "-")
+                    "previous": ev.get("previous", "-"),
+                    "is_tier1": is_tier1
                 })
 
         return upcoming
