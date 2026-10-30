@@ -156,63 +156,100 @@ def run_cycle(cycle_num: int = 1) -> int:
                 from_date = datetime.now() - timedelta(days=7)
                 to_date = datetime.now() + timedelta(days=1)
                 closed_deals = mt5.history_deals_get(from_date, to_date)
+                open_pos_tickets = {p["ticket"] for p in open_positions}
                 
                 if closed_deals:
-                    deal_map = {d.position_id: d for d in closed_deals if d.entry == 1 and getattr(d, "magic", 0) == 10102026} # exit deals indexed by bot position ticket
-                    
                     for row in open_db_trades:
                         db_id, t_ticket, t_sym, t_dir, t_lots, t_entry, t_sl, t_tp, t_strat = row
                         
-                        # If trade is closed in MT5 (deal with matching position ticket exists)
-                        matching_deal = deal_map.get(t_ticket)
-                        if matching_deal:
-                            exit_price = matching_deal.price
-                            profit_usd = matching_deal.profit
-                            exit_time = datetime.fromtimestamp(matching_deal.time).isoformat()
-                            comment = matching_deal.comment or ""
+                        # Only finalize if the position is completely closed in MT5 (not still running a partial runner)
+                        if t_ticket in open_pos_tickets:
+                            continue
 
-                            # Sanity filter against broker feed glitches (e.g. timestamp leaked as exit price)
+                        # Fetch all exit deals for this position (aggregates partial TP + final exit)
+                        matching_deals = [
+                            d for d in closed_deals 
+                            if d.position_id == t_ticket and d.entry == 1 and getattr(d, "magic", 0) == 10102026
+                        ]
+
+                        if matching_deals:
+                            total_profit_usd = round(sum(d.profit + d.swap + d.commission for d in matching_deals), 2)
+                            total_closed_lots = round(sum(d.volume for d in matching_deals), 2)
+                            last_deal = max(matching_deals, key=lambda d: d.time)
+                            exit_time = datetime.fromtimestamp(last_deal.time).isoformat()
+                            comment = last_deal.comment or ""
+
+                            # Calculate volume-weighted exit price
+                            exit_price = (
+                                round(sum(d.price * d.volume for d in matching_deals) / total_closed_lots, 5)
+                                if total_closed_lots > 0 else last_deal.price
+                            )
+
+                            # Sanity filter against broker feed glitches
                             if t_entry and (exit_price > 5.0 * t_entry or exit_price < 0.2 * t_entry):
                                 exit_price = t_entry
                             
                             # Determine exit reason with instrument-specific pip scale tolerance
                             sym_pip = 0.01 if "JPY" in t_sym else (0.1 if "XAU" in t_sym else 0.0001)
                             tol = 2.0 * sym_pip
-                            if "sl" in comment.lower() or abs(exit_price - (t_sl or 0)) <= tol:
+                            if "sl" in comment.lower() or abs(last_deal.price - (t_sl or 0)) <= tol:
                                 exit_reason = "STOP LOSS HIT"
-                            elif "tp" in comment.lower() or (t_tp and abs(exit_price - t_tp) <= tol):
+                            elif "tp" in comment.lower() or (t_tp and abs(last_deal.price - t_tp) <= tol):
                                 exit_reason = "TAKE PROFIT HIT"
                             elif "so" in comment.lower():
                                 exit_reason = f"STOP OUT / GLITCH ({comment})"
                             else:
                                 exit_reason = f"CLOSED ({comment})" if comment else "CLOSED"
 
+                            if len(matching_deals) > 1:
+                                exit_reason = f"PARTIAL TP + {exit_reason}"
+
                             # Calculate R multiple
                             r_risk = abs(t_entry - t_sl) if t_sl else 0.0001
-                            if abs(profit_usd) < 0.01:
+                            if abs(total_profit_usd) < 0.01:
                                 pnl_r = 0.0
                             else:
                                 pnl_r = round((exit_price - t_entry) / r_risk if t_dir == "BUY" else (t_entry - exit_price) / r_risk, 2)
 
                             # Generate Post-Trade Analysis Report
-                            if abs(profit_usd) < 0.01:
+                            if abs(total_profit_usd) < 0.01:
                                 analysis_text = f"Trade closed at break-even ($0.00 PnL). Exit reason: {exit_reason}. Capital fully intact."
-                            elif profit_usd < 0:
+                            elif total_profit_usd < 0:
                                 analysis_text = (
                                     f"Trade was stopped out at `{exit_price:.5f}`. Market experienced a pullback/spread expansion past the dynamic ATR stop buffer (`{t_sl:.5f}`). "
                                     f"Capital was strictly protected to initial 1% risk cap."
                                 )
                             else:
-                                analysis_text = (
-                                    f"Target reached at `{exit_price:.5f}`! Strategy {t_strat} captured +{pnl_r}R profit into the expansion leg."
-                                )
+                                if len(matching_deals) > 1:
+                                    analysis_text = (
+                                        f"Target reached at weighted `{exit_price:.5f}`! (33% Partial TP + Runner exit). "
+                                        f"Strategy {t_strat} captured total ${total_profit_usd:+,.2f} (+{pnl_r}R) across {total_closed_lots:.2f} lots."
+                                    )
+                                else:
+                                    analysis_text = (
+                                        f"Target reached at `{exit_price:.5f}`! Strategy {t_strat} captured +{pnl_r}R profit into the expansion leg."
+                                    )
 
-                            # Update database
+                            # Update database with unified totality of the trade
                             cur.execute("""
                                 UPDATE trades 
-                                SET exit_time = ?, exit_price = ?, exit_reason = ?, pnl_usd = ?, pnl_r = ?, notes = ?
+                                SET exit_time = ?, exit_price = ?, exit_reason = ?, pnl_usd = ?, pnl_r = ?, notes = ?, lots = ?
                                 WHERE id = ?
-                            """, (exit_time, exit_price, exit_reason, profit_usd, pnl_r, analysis_text, db_id))
+                            """, (exit_time, exit_price, exit_reason, total_profit_usd, pnl_r, analysis_text, total_closed_lots or t_lots, db_id))
+                            conn.commit()
+
+                            # Dispatch alerts and live log
+                            append_live_log(f"📋 [TRADE REPORT] Closed #{t_ticket} ({t_sym} {t_dir}) | Total PnL: ${total_profit_usd:+,.2f} ({pnl_r}R) | Reason: {exit_reason}")
+                            notifier.notify_trade_closed(
+                                symbol=t_sym,
+                                direction=t_dir,
+                                lots=total_closed_lots or t_lots,
+                                entry_price=t_entry,
+                                exit_price=exit_price,
+                                profit_usd=total_profit_usd,
+                                exit_reason=exit_reason,
+                                analysis_explanation=analysis_text
+                            )
                             conn.commit()
 
                             # Dispatch alerts and live log

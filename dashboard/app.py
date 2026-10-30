@@ -513,18 +513,44 @@ with tab_positions:
             raw_positions = mt5.positions_get()
             positions = [p for p in raw_positions if getattr(p, "magic", 0) == 10102026] if raw_positions else []
             if positions and len(positions) > 0:
-                df_pos = pd.DataFrame([{
-                    "Ticket": p.ticket,
-                    "Symbol": p.symbol,
-                    "Type": "BUY" if p.type == 0 else "SELL",
-                    "Lots": p.volume,
-                    "Entry Price": p.price_open,
-                    "Current Price": p.price_current,
-                    "Stop Loss": p.sl,
-                    "Take Profit": p.tp if p.tp > 0 else "Trailing",
-                    "Profit ($)": f"${p.profit:,.2f}"
-                } for p in positions])
-                st.dataframe(df_pos, use_container_width=True)
+                # Load trade management state to display live stage
+                state_file = ROOT_DIR / "data" / "trade_management_state.json"
+                tm_state = {}
+                if state_file.exists():
+                    try:
+                        import json
+                        with open(state_file, "r") as f:
+                            tm_state = json.load(f)
+                    except Exception:
+                        pass
+
+                pos_rows = []
+                for p in positions:
+                    p_state = tm_state.get(str(p.ticket), {})
+                    if p_state.get("partial_tp_taken", False):
+                        stage_label = "💰 33% Banked (Runner)"
+                    elif p_state.get("step_locked", False):
+                        stage_label = "🔒 +0.6R Locked"
+                    elif p_state.get("be_applied", False):
+                        stage_label = "🛡️ Break-Even Protected"
+                    else:
+                        stage_label = "🎯 Active (Target +1.2R)"
+
+                    pos_rows.append({
+                        "Ticket": p.ticket,
+                        "Symbol": p.symbol,
+                        "Type": "BUY" if p.type == 0 else "SELL",
+                        "Lots": p.volume,
+                        "Entry Price": p.price_open,
+                        "Current Price": p.price_current,
+                        "Stop Loss": p.sl,
+                        "Take Profit": p.tp if p.tp > 0 else "Trailing (Uncapped)",
+                        "Floating P&L": f"${p.profit:,.2f}",
+                        "Protection Stage": stage_label
+                    })
+
+                df_pos = pd.DataFrame(pos_rows)
+                st.dataframe(df_pos, use_container_width=True, hide_index=True)
             else:
                 st.info("No active bot positions currently running in MT5.")
 
