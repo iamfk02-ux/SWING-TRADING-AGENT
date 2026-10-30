@@ -116,6 +116,21 @@ risk:
   friday_cutoff_server_hour: 18
 
 # ---------------------------------------------------------------------
+# TRADE MANAGEMENT & PROFIT LOCKING (Balanced Model)
+# ---------------------------------------------------------------------
+trade_management:
+  enabled: true
+  breakeven_trigger_r: 0.8         # Move SL to Break-Even at +0.8R
+  breakeven_buffer_r: 0.1          # Cushion above entry (0.1R) to cover commission/spread
+  partial_tp_trigger_r: 1.2        # Bank partial profit at +1.2R
+  partial_tp_volume_pct: 0.33      # Bank 33% of position into cash
+  step_lock_trigger_r: 1.5         # Step-lock guaranteed profit at +1.5R
+  step_lock_guarantee_r: 0.6       # Guaranteed locked profit (+0.6R)
+  dynamic_trail_trigger_r: 1.8     # Trail SL once trade reaches +1.8R
+  trail_atr_multiplier: 1.2        # Distance behind price: 1.2 * lower_atr
+  trail_to_candle_structure: true  # Trail behind previous candle High/Low
+
+# ---------------------------------------------------------------------
 # SIGNAL SCORER & QUALITY FILTER
 # ---------------------------------------------------------------------
 scorer:

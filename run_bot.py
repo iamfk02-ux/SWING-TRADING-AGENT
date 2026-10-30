@@ -326,81 +326,27 @@ def run_cycle(cycle_num: int = 1) -> int:
         except Exception as e:
             append_live_log(f"News Shield check error: {e}", level="WARNING")
 
-    # 1. Partial Take Profit (50%) & Trailing Stops for open positions
-    for pos in open_positions:
-        sym = pos["symbol"]
-        df_d1, df_lower = data_agent.get_bars(sym, timeframe=timeframe)
-        if len(df_d1) > 15:
-            d1_atr = compute_atr(df_d1, 14).iloc[-1]
-            tick = mt5.symbol_info_tick(sym)
-            if tick and d1_atr > 0:
-                current_price = tick.bid if pos["direction"] == "BUY" else tick.ask
-                entry = pos["entry_price"]
-                sl = pos["sl"]
-                tp = pos["tp"]
-                current_vol = pos["volume"]
+    # 1. Balanced Trade Management (Break-Even @ +0.8R, 33% Partial TP @ +1.2R, Step-Lock @ +1.5R, Trailing Stop @ +1.8R+)
+    try:
+        from core.trade_manager import TradeManager
+        trade_manager = TradeManager(config)
+        active_tickets = [p["ticket"] for p in open_positions]
+        trade_manager.prune_closed_positions(active_tickets)
 
-                # 1A. Partial Take Profit Trigger at 1.5R:
-                # If price reached TP level and volume is >= 0.02 lots, bank 50% profit & remove TP cap for trailing runner
-                if tp > 0 and current_vol >= 0.02:
-                    hit_tp = (pos["direction"] == "BUY" and current_price >= tp) or \
-                             (pos["direction"] == "SELL" and current_price <= tp)
-                    if hit_tp:
-                        half_vol = round(current_vol / 2.0, 2)
-                        pnl_usd = pos["profit"] * (half_vol / current_vol)
-                        success = exec_agent.close_partial_position(pos["ticket"], half_vol)
-                        if success:
-                            # Move SL to Break-Even (+0.1R cushion) and set TP to 0 (unlimited runner)
-                            be_sl = entry + (0.1 * d1_atr) if pos["direction"] == "BUY" else entry - (0.1 * d1_atr)
-                            exec_agent.modify_sltp(pos["ticket"], new_sl=be_sl, new_tp=0.0)
-                            rem_vol = round(current_vol - half_vol, 2)
-                            append_live_log(f"💰 [PARTIAL TP] {sym}: Banked +${pnl_usd:,.2f} on {half_vol} lots! Remaining {rem_vol} lots running risk-free with Trailing Stop.")
-                            notifier.notify_partial_tp(sym, half_vol, rem_vol, current_price, pnl_usd, be_sl)
-                            continue
-
-                # 1B. Standard Break-even at +1.0R of profit
-                lower_atr = compute_atr(df_lower, 14).iloc[-1]
-                risk_dist = abs(entry - sl) if (sl > 0 and ((pos["direction"] == "BUY" and sl < entry) or (pos["direction"] == "SELL" and sl > entry))) else (1.2 * lower_atr)
-
-                if pos["direction"] == "BUY":
-                    profit_dist = current_price - entry
-                    if profit_dist >= (1.0 * risk_dist) and sl < entry:
-                        new_sl = round(entry + (0.1 * risk_dist), 5)
-                        exec_agent.modify_stop_loss(pos["ticket"], new_sl)
-                        append_live_log(f"🎯 [MANAGEMENT] {sym} +1.0R reached! Stop Loss moved to Break-Even at {new_sl:.5f}")
-                        notifier.notify_breakeven(sym, new_sl)
-
-                elif pos["direction"] == "SELL":
-                    profit_dist = entry - current_price
-                    if profit_dist >= (1.0 * risk_dist) and (sl > entry or sl == 0):
-                        new_sl = round(entry - (0.1 * risk_dist), 5)
-                        exec_agent.modify_stop_loss(pos["ticket"], new_sl)
-                        append_live_log(f"🎯 [MANAGEMENT] {sym} +1.0R reached! Stop Loss moved to Break-Even at {new_sl:.5f}")
-                        notifier.notify_breakeven(sym, new_sl)
-
-                # 1C. Dynamic Chandelier Trailing Stop (Locks in multi-R gains)
-                # Once trade achieves >= 1.5R, trail SL behind current price by 1.5 * lower_atr
-                sym_info = mt5.symbol_info(sym)
-                sym_digits = sym_info.digits if (sym_info and sym_info.digits is not None) else 5
-                sym_pip = 0.01 if "JPY" in sym else (0.1 if "XAU" in sym else 0.0001)
-
-                profit_dist = (current_price - entry) if pos["direction"] == "BUY" else (entry - current_price)
-                if profit_dist >= (1.5 * risk_dist):
-                    trail_dist = 1.5 * lower_atr
-                    min_step = 2.0 * sym_pip  # Require at least 2 pips ratchet to avoid broker micro-requests
-
-                    if pos["direction"] == "BUY":
-                        trail_candidate = round(current_price - trail_dist, sym_digits)
-                        if trail_candidate > (sl + min_step) and trail_candidate > entry:
-                            if exec_agent.modify_stop_loss(pos["ticket"], trail_candidate):
-                                locked_r = round((trail_candidate - entry) / risk_dist, 2)
-                                append_live_log(f"📈 [TRAILING STOP] {sym} BUY: Stop Loss ratcheted up to {trail_candidate:.5f} (Locking in +{locked_r}R profit)")
-                    elif pos["direction"] == "SELL":
-                        trail_candidate = round(current_price + trail_dist, sym_digits)
-                        if (sl == 0 or trail_candidate < (sl - min_step)) and trail_candidate < entry:
-                            if exec_agent.modify_stop_loss(pos["ticket"], trail_candidate):
-                                locked_r = round((entry - trail_candidate) / risk_dist, 2)
-                                append_live_log(f"📉 [TRAILING STOP] {sym} SELL: Stop Loss ratcheted down to {trail_candidate:.5f} (Locking in +{locked_r}R profit)")
+        for pos in open_positions:
+            sym = pos["symbol"]
+            df_d1, df_lower = data_agent.get_bars(sym, timeframe=timeframe)
+            if len(df_d1) > 15 and len(df_lower) > 5:
+                trade_manager.process_position(
+                    pos=pos,
+                    df_lower=df_lower,
+                    mt5_module=mt5,
+                    exec_agent=exec_agent,
+                    notifier=notifier,
+                    logger_func=append_live_log
+                )
+    except Exception as e:
+        append_live_log(f"Trade management engine error: {e}", level="WARNING")
 
     # 2. Scan market for new signals across all 3 strategy agents
     scanned_count = 0
