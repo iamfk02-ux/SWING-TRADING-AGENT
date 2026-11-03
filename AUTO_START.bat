@@ -19,5 +19,7 @@ if "%ERRORLEVEL%"=="1" (
 rem 2. Launch Trading Bot scanning engine in background
 start /min "SwingBotEngine" python run_bot.py
 
-rem 3. Launch Dashboard Control Center in background and open browser
-start /min "SwingBotDashboard" python -m streamlit run dashboard/app.py --server.headless=true
+rem 3. Launch Dashboard Control Center in background and automatically open browser
+start /min "SwingBotDashboard" python -m streamlit run dashboard/app.py
+timeout /t 3 /nobreak >NUL
+start http://localhost:8501
