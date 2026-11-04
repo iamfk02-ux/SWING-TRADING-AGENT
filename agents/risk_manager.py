@@ -24,6 +24,7 @@ class RiskManager:
         self.max_currency_risk_pct = risk_cfg.get("max_currency_exposure_pct", 2.0)
         self.throttle_pct = risk_cfg.get("drawdown_throttle_pct", 10.0)
         self.kill_switch_pct = risk_cfg.get("kill_switch_drawdown_pct", 20.0)
+        self.min_stop_loss_pips = risk_cfg.get("min_stop_loss_pips", 20.0)
         self.is_cent_account = config.get("account", {}).get("type", "cent") == "cent"
         
         # News Guard (Economic Calendar Filter)
@@ -126,8 +127,38 @@ class RiskManager:
         if is_weekend:
             return False, f"WEEKEND: {symbol} market is closed. Traditional markets resume Sunday 5:00 PM EST.", 0.0
 
+        # 0.1 Minimum Stop Floor Enforcement (Mandatory 20-pip safety floor)
+        # Prevents overnight and Asian-session whipsaws from clipping tight stops
+        entry = signal.get("entry", 0.0)
+        stop = signal.get("stop_loss", 0.0)
+        direction = signal.get("direction", "BUY")
+        stop_dist = abs(entry - stop)
+        if stop_dist <= 0:
+            return False, "INVALID STOP DISTANCE", 0.0
+
+        pip_size = 0.01 if ("JPY" in symbol or "jpy" in symbol) else (0.1 if "XAU" in symbol else 0.0001)
+        min_stop_dist = self.min_stop_loss_pips * pip_size
+
+        if stop_dist < min_stop_dist:
+            if direction == "BUY":
+                new_sl = round(entry - min_stop_dist, 5)
+            else:
+                new_sl = round(entry + min_stop_dist, 5)
+
+            # Preserve minimum 2.0R or original R reward
+            curr_tp = signal.get("take_profit")
+            if curr_tp:
+                orig_r = max(2.0, abs(curr_tp - entry) / stop_dist) if stop_dist > 0 else 2.0
+                if direction == "BUY":
+                    signal["take_profit"] = round(entry + (orig_r * min_stop_dist), 5)
+                else:
+                    signal["take_profit"] = round(entry - (orig_r * min_stop_dist), 5)
+
+            signal["stop_loss"] = new_sl
+            stop = new_sl
+            stop_dist = min_stop_dist
+
         # 0.2 Spread & Liquidity Filter (Protects against midnight rollover spread widening)
-        stop_dist = abs(signal["entry"] - signal["stop_loss"])
         try:
             import MetaTrader5 as mt5
             t_info = mt5.symbol_info_tick(symbol)

@@ -28,6 +28,7 @@ class TrendAgent:
         self.min_stop_atr = trend_cfg.get("min_stop_atr", 1.2)        # Upgraded: Minimum 1.2 ATR stop
         self.max_stop_atr = trend_cfg.get("max_stop_atr", 3.0)
         self.target_r = trend_cfg.get("target_r", 2.0)                # Upgraded: Minimum 2.0R target
+        self.min_stop_pips = trend_cfg.get("min_stop_pips", 20.0)      # Mandatory 20-pip stop floor
         self.strong_adx = trend_cfg.get("strong_adx", 25)
 
     def scan_for_signal(
@@ -102,7 +103,14 @@ class TrendAgent:
             sl = swing_low - (self.stop_buffer_atr * atr_val)
             stop_dist = curr_bar["close"] - sl
 
-            if not (self.min_stop_atr * atr_val <= stop_dist <= self.max_stop_atr * atr_val):
+            # Enforce 20-pip minimum stop floor to protect against lower-timeframe whipsaws
+            pip_size = 0.01 if "JPY" in symbol.upper() else 0.0001
+            min_stop_dist = self.min_stop_pips * pip_size
+            if stop_dist < min_stop_dist:
+                stop_dist = min_stop_dist
+                sl = curr_bar["close"] - stop_dist
+
+            if stop_dist > self.max_stop_atr * atr_val and stop_dist > (min_stop_dist * 2.5):
                 return None
 
             # Multi-Factor Confluence Scoring (Base 0.50, requires >= 0.75 for execution)
@@ -140,6 +148,10 @@ class TrendAgent:
             limit_price = round(curr_bar["close"] - 0.3 * (curr_bar["close"] - ema_target), 5)
             if limit_price >= curr_bar["close"]:
                 limit_price = round(curr_bar["close"] - 0.1 * atr_val, 5)
+
+            # Ensure effective stop distance from entry price respects the minimum pip floor
+            if (limit_price - sl) < min_stop_dist:
+                sl = round(limit_price - min_stop_dist, 5)
 
             # Minimum 2.0R Target (Enforcing High Expectancy)
             r_dist = abs(limit_price - sl)
@@ -188,7 +200,14 @@ class TrendAgent:
             sl = swing_high + (self.stop_buffer_atr * atr_val)
             stop_dist = sl - curr_bar["close"]
 
-            if not (self.min_stop_atr * atr_val <= stop_dist <= self.max_stop_atr * atr_val):
+            # Enforce 20-pip minimum stop floor to protect against lower-timeframe whipsaws
+            pip_size = 0.01 if "JPY" in symbol.upper() else 0.0001
+            min_stop_dist = self.min_stop_pips * pip_size
+            if stop_dist < min_stop_dist:
+                stop_dist = min_stop_dist
+                sl = curr_bar["close"] + stop_dist
+
+            if stop_dist > self.max_stop_atr * atr_val and stop_dist > (min_stop_dist * 2.5):
                 return None
 
             # Multi-Factor Confluence Scoring (Base 0.50, requires >= 0.75 for execution)
@@ -226,6 +245,10 @@ class TrendAgent:
             limit_price = round(curr_bar["close"] + 0.3 * (ema_target - curr_bar["close"]), 5)
             if limit_price <= curr_bar["close"]:
                 limit_price = round(curr_bar["close"] + 0.1 * atr_val, 5)
+
+            # Ensure effective stop distance from entry price respects the minimum pip floor
+            if (sl - limit_price) < min_stop_dist:
+                sl = round(limit_price + min_stop_dist, 5)
 
             # Minimum 2.0R Target (Enforcing High Expectancy)
             r_dist = abs(sl - limit_price)
