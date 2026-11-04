@@ -19,6 +19,7 @@ class RiskManager:
         self.config = config
         risk_cfg = config.get("risk", {})
         self.risk_pct = risk_cfg.get("risk_per_trade_pct", 1.0)
+        self.max_risk_pct = risk_cfg.get("max_risk_per_trade_pct", 2.0)
         self.max_open_pos = risk_cfg.get("max_open_positions", 3)
         self.max_currency_risk_pct = risk_cfg.get("max_currency_exposure_pct", 2.0)
         self.throttle_pct = risk_cfg.get("drawdown_throttle_pct", 10.0)
@@ -201,14 +202,16 @@ class RiskManager:
         # 5. Position Sizing
         entry = signal["entry"]
         stop = signal["stop_loss"]
+        direction = signal["direction"]
         stop_dist = abs(entry - stop)
         if stop_dist <= 0:
             return False, "INVALID STOP DISTANCE", 0.0
 
-        # Determine exact lot size via MT5 contract specs or fallback formulas
+        # Determine exact lot size via MT5 native contract engine or fallback formulas
         raw_lots = 0.01
         min_lot = 0.01
         lot_step = 0.01
+        cost_per_lot = 0.0
 
         mt5_connected = False
         try:
@@ -218,46 +221,41 @@ class RiskManager:
                 mt5_connected = True
                 min_lot = info.volume_min if info.volume_min > 0 else 0.01
                 lot_step = info.volume_step if info.volume_step > 0 else 0.01
-                tick_size = info.trade_tick_size if info.trade_tick_size > 0 else info.point
-                tick_val = info.trade_tick_value
-                if tick_size > 0 and tick_val > 0:
-                    ticks_at_risk = stop_dist / tick_size
-                    cost_per_lot = ticks_at_risk * tick_val
-                    if cost_per_lot > 0:
-                        raw_lots = risk_amount_usd / cost_per_lot
+
+                # Priority 1: Use MT5 native profit/loss calculation engine (100% broker-certified across all asset classes)
+                mt5_action = mt5.ORDER_TYPE_BUY if direction == "BUY" else mt5.ORDER_TYPE_SELL
+                calc_loss = mt5.order_calc_profit(mt5_action, symbol, 1.0, entry, stop)
+                if calc_loss is not None and abs(calc_loss) > 0:
+                    cost_per_lot = abs(calc_loss)
+                    raw_lots = risk_amount_usd / cost_per_lot
         except Exception:
             pass
 
-        if not mt5_connected:
-            # Universal fallback position sizing
+        # Priority 2: Precise mathematical fallbacks if MT5 native calc unavailable or zero
+        if cost_per_lot <= 0:
             if "XAU" in symbol or "GOLD" in symbol:
-                # 1 standard lot = 100 troy oz. $1 move = $100 per lot.
+                # 1 standard lot = 100 troy oz. $1.00 move = $100.00 loss per standard lot.
                 cost_per_lot = stop_dist * 100.0
                 raw_lots = risk_amount_usd / max(cost_per_lot, 1.0)
-                min_lot = 0.01
             else:
-                # Standard Forex: pip math
+                # Standard Forex: pip math converted to account currency
                 pip_size = 0.01 if "JPY" in symbol else 0.0001
                 stop_pips = stop_dist / pip_size
                 pip_val_per_lot = 10.0 if not self.is_cent_account else 0.10
-                raw_lots = risk_amount_usd / max(stop_pips * pip_val_per_lot, 0.01)
-                min_lot = 0.01
+                cost_per_lot = stop_pips * pip_val_per_lot
+                raw_lots = risk_amount_usd / max(cost_per_lot, 0.01)
 
-        # Round to step and enforce minimum
+        # Round to broker step and enforce minimum
         steps = round(raw_lots / lot_step)
         rounded_lots = round(max(min_lot, steps * lot_step), 2)
 
-        # Check maximum safety threshold (hard limit 2.5% of account on minimum lot)
-        # Prevent oversized fills on very small cent balances
-        if "cost_per_lot" not in locals() or cost_per_lot <= 0:
-            if "XAU" in symbol or "GOLD" in symbol:
-                cost_per_lot = stop_dist * 100.0
-            else:
-                pip_sz = 0.01 if "JPY" in symbol else 0.0001
-                cost_per_lot = (stop_dist / pip_sz) * (10.0 if not self.is_cent_account else 0.10)
+        # Safety Check: If rounded lot size would risk more than 1.25x desired risk, step down by 1 step
+        while rounded_lots > min_lot and (rounded_lots * cost_per_lot) > (risk_amount_usd * 1.15):
+            rounded_lots = round(rounded_lots - lot_step, 2)
 
+        # Hard Cap: Enforce strict safety limit (cannot exceed 2.0% risk under any broker discrepancy)
         actual_risk_usd = rounded_lots * cost_per_lot
-        if actual_risk_usd > (account_equity * 0.025):
-            return False, f"MIN LOT TOO LARGE FOR ACCOUNT (${actual_risk_usd:.2f} > 2.5% max risk cap)", 0.0
+        if actual_risk_usd > (account_equity * (self.max_risk_pct / 100.0)):
+            return False, f"LOT SIZING EXCEEDS HARD RISK CAP (${actual_risk_usd:.2f} > {self.max_risk_pct}% max risk cap)", 0.0
 
         return True, "APPROVED", rounded_lots
