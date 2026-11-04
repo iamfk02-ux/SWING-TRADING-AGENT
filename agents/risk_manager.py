@@ -44,6 +44,10 @@ class RiskManager:
         # Symbol Loss Lockout (Post-loss cooldown to prevent churn)
         self.symbol_loss_cooldown_hours = risk_cfg.get("symbol_loss_cooldown_hours", 24)
 
+        # Institutional Session Filter & Rollover Shield
+        self.session_filter_cfg = risk_cfg.get("session_filter", {})
+        self.rollover_shield_cfg = risk_cfg.get("rollover_shield", {})
+
     def _check_symbol_loss_cooldown(self, symbol: str) -> Tuple[bool, str]:
         """
         Enforces a mandatory cooldown on symbols that recently closed at a loss
@@ -94,6 +98,54 @@ class RiskManager:
             return [s[:3], s[3:6]]
         return [s]
 
+    def _is_in_rollover_window(self, now_utc: datetime) -> Tuple[bool, str]:
+        """
+        Checks if current time falls within the 5:00 PM EST interbank rollover window
+        (typically 21:45 to 22:30 UTC) where spreads widen drastically.
+        """
+        if not self.rollover_shield_cfg.get("enabled", True):
+            return False, ""
+
+        sh = self.rollover_shield_cfg.get("freeze_start_utc_hour", 21)
+        sm = self.rollover_shield_cfg.get("freeze_start_utc_minute", 45)
+        eh = self.rollover_shield_cfg.get("freeze_end_utc_hour", 22)
+        em = self.rollover_shield_cfg.get("freeze_end_utc_minute", 30)
+
+        curr_mins = now_utc.hour * 60 + now_utc.minute
+        start_mins = sh * 60 + sm
+        end_mins = eh * 60 + em
+
+        if start_mins <= curr_mins <= end_mins:
+            return True, f"ROLLOVER FREEZE: Daily 5:00 PM EST interbank rollover active ({sh:02d}:{sm:02d}-{eh:02d}:{em:02d} UTC). Spreads temporarily wide."
+        return False, ""
+
+    def _is_outside_liquidity_session(self, symbol: str, now_utc: datetime) -> Tuple[bool, str]:
+        """
+        Checks if current time falls outside high-liquidity trading sessions (London & New York).
+        Filters out low-volume overnight/Asian range drift.
+        """
+        if not self.session_filter_cfg.get("enabled", True):
+            return False, ""
+
+        if self.session_filter_cfg.get("allow_asian_session_for_jpy_aud", False):
+            if any(k in symbol.upper() for k in ["JPY", "AUD"]):
+                if 0 <= now_utc.hour < 9:
+                    return False, ""
+
+        sh = self.session_filter_cfg.get("start_utc_hour", 7)
+        sm = self.session_filter_cfg.get("start_utc_minute", 0)
+        eh = self.session_filter_cfg.get("end_utc_hour", 17)
+        em = self.session_filter_cfg.get("end_utc_minute", 0)
+
+        curr_mins = now_utc.hour * 60 + now_utc.minute
+        start_mins = sh * 60 + sm
+        end_mins = eh * 60 + em
+
+        if not (start_mins <= curr_mins < end_mins):
+            curr_str = f"{now_utc.hour:02d}:{now_utc.minute:02d} UTC"
+            return True, f"SESSION FILTER: Outside peak liquidity hours ({sh:02d}:{sm:02d}-{eh:02d}:{em:02d} UTC London/NY). Current: {curr_str}."
+        return False, ""
+
     def evaluate_order(
         self,
         signal: Dict[str, Any],
@@ -111,21 +163,32 @@ class RiskManager:
         symbol = signal["symbol"].upper()
         pending_orders = pending_orders or []
 
-        # 0. Weekend Market Status Check
-        # Forex and Metals close on weekends (Friday 5pm EST to Sunday 5pm EST).
-        is_weekend = False
+        now_utc = datetime.now(timezone.utc)
         if "timestamp" in signal and signal["timestamp"]:
             try:
                 import pandas as pd
                 ts = pd.to_datetime(signal["timestamp"])
-                is_weekend = ts.weekday() in (5, 6)
+                if ts.tzinfo is not None:
+                    now_utc = ts.tz_convert(timezone.utc)
+                else:
+                    now_utc = ts.tz_localize(timezone.utc)
             except Exception:
-                is_weekend = datetime.now(timezone.utc).weekday() in (5, 6)
-        else:
-            is_weekend = datetime.now(timezone.utc).weekday() in (5, 6)
+                pass
 
-        if is_weekend:
+        # 0. Weekend Market Status Check
+        # Forex and Metals close on weekends (Friday 5pm EST to Sunday 5pm EST).
+        if now_utc.weekday() in (5, 6):
             return False, f"WEEKEND: {symbol} market is closed. Traditional markets resume Sunday 5:00 PM EST.", 0.0
+
+        # 0.01 Rollover Shield (Daily 5:00 PM EST interbank settlement freeze)
+        in_rollover, rollover_reason = self._is_in_rollover_window(now_utc)
+        if in_rollover:
+            return False, rollover_reason, 0.0
+
+        # 0.02 Session Liquidity Filter (Peak London/NY liquidity hours only)
+        out_session, session_reason = self._is_outside_liquidity_session(symbol, now_utc)
+        if out_session:
+            return False, session_reason, 0.0
 
         # 0.1 Minimum Stop Floor Enforcement (Mandatory 20-pip safety floor)
         # Prevents overnight and Asian-session whipsaws from clipping tight stops

@@ -108,6 +108,22 @@ risk:
     enabled: true
     max_consecutive_exec_errors: 3 # pause order placement if 3 broker errors occur
     pause_duration_minutes: 60     # cooldown time in minutes
+  # Institutional Session Liquidity Filter (Upgrade #1)
+  session_filter:
+    enabled: true
+    start_utc_hour: 7              # 07:00 UTC (London Open / Frankfurt active)
+    start_utc_minute: 0
+    end_utc_hour: 17               # 17:00 UTC (London Close / US Session active)
+    end_utc_minute: 0
+    allow_asian_session_for_jpy_aud: false # Enforce London/NY peak liquidity across all pairs
+  # 5:00 PM EST Rollover Shield (Upgrade #2)
+  rollover_shield:
+    enabled: true
+    # Global interbank settlement window: 21:45 UTC to 22:30 UTC
+    freeze_start_utc_hour: 21
+    freeze_start_utc_minute: 45
+    freeze_end_utc_hour: 22
+    freeze_end_utc_minute: 30
   # No new forex entries on Friday after this hour (broker server time).
   # Server time is usually UK time + 2 hours, so 18 = 16:00 UK.
   friday_cutoff_server_hour: 18

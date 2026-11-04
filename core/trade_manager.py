@@ -150,6 +150,12 @@ class TradeManager:
                 "highest_r": 0.0
             }
 
+        # Rollover Shield: Freeze stop modification during 5:00 PM EST rollover spread blowout (21:45 to 22:30 UTC)
+        now_utc = datetime.now(timezone.utc)
+        curr_mins = now_utc.hour * 60 + now_utc.minute
+        if (21 * 60 + 45) <= curr_mins <= (22 * 60 + 30):
+            return
+
         tick = mt5_module.symbol_info_tick(sym)
         if not tick:
             return
