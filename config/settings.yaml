@@ -71,13 +71,9 @@ symbols:
     - USDJPY
     - AUDUSD
     - USDCAD
-    - NZDUSD
-    - USDCHF
     - EURGBP
-    - EURJPY
-  # Metals: high volatility, active during weekdays
-  metals:
-    - XAUUSD
+  # Metals: set to empty list to disable metal trading
+  metals: []
 
 # ---------------------------------------------------------------------
 # RISK MANAGER  (hard rules - the optimizer can never change these)
