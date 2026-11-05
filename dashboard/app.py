@@ -691,46 +691,18 @@ with tab_history:
 # TAB 2: HUMAN NEWS DESK
 with tab_news:
     st.subheader("🛡️ Institutional News Shield & Macro Intelligence Desk")
-    st.caption("Real-time blackout protection, live breaking macro wire, and 1-click directional bias control for your 6 watchlist pairs.")
 
     import importlib
     import core.news_assistant
     import core.news_feed
     importlib.reload(core.news_assistant)
     importlib.reload(core.news_feed)
-    from core.news_assistant import get_upcoming_economic_events, analyze_news_snippet, get_watchlist_shield_status
+    from core.news_assistant import get_upcoming_economic_events, analyze_news_snippet
     from core.news_feed import get_latest_financial_news
     from core.database import delete_news_bias, clear_all_news_biases
 
     WATCHLIST_CURRENCIES = ["USD", "EUR", "GBP", "JPY", "AUD"]
 
-    # ---------------------------------------------------------
-    # TOP-LEVEL LIVE SHIELD STATUS BANNER
-    # ---------------------------------------------------------
-    shield_info = get_watchlist_shield_status(WATCHLIST_CURRENCIES)
-    if shield_info["is_shield_engaged"]:
-        active_list = shield_info["active_shields"]
-        alert_lines = [
-            f"• **{ev['country']} — {ev['title']}** ({ev['impact']}) | Status: `{ev['status']}`"
-            for ev in active_list
-        ]
-        st.error(
-            "🚨 **NEWS SHIELD ENGAGED — NEW ENTRIES BLOCKED ON AFFECTED PAIRS**\n\n"
-            + "\n".join(alert_lines)
-            + "\n\n*Open trades ≥ +0.5R on affected currencies are automatically protected at Break-Even.*"
-        )
-    else:
-        next_ev = shield_info.get("next_major_event")
-        next_txt = (
-            f"Next Watchlist Major: **{next_ev['country']} {next_ev['title']}** ({next_ev['impact']}) — `{next_ev['status']}` ({next_ev['date']})"
-            if next_ev else "No remaining High/Tier-1 releases scheduled for this week."
-        )
-        st.success(
-            f"🟢 **ALL CLEAR — NORMAL TECHNICAL EXECUTION ACTIVE** across all 6 watchlist pairs (`EURUSD`, `GBPUSD`, `USDJPY`, `AUDUSD`, `EURJPY`, `EURGBP`).\n\n"
-            f"📅 {next_txt}"
-        )
-
-    st.markdown("---")
     col_bias, col_calendar = st.columns([1.05, 1.25], gap="large")
 
     # ---------------------------------------------------------
@@ -753,7 +725,7 @@ with tab_news:
                         st.success("All active biases cleared!")
                         st.rerun()
                 else:
-                    st.info("No active currency biases set. Running 100% on pure technical consensus.")
+                    st.caption("No active currency biases set. Running 100% on pure technical consensus.")
 
         with st.expander("➕ Set Manual Currency Bias Override", expanded=False):
             with st.form("quick_bias_form"):
@@ -794,7 +766,6 @@ with tab_news:
         wire_hdr1, wire_hdr2 = st.columns([3, 1])
         with wire_hdr1:
             st.markdown("#### ⚡ Live Breaking Macro Wire")
-            st.caption("Auto-filtered for `USD`, `EUR`, `GBP`, `JPY`, `AUD` with 1-click AI sentiment bias.")
         with wire_hdr2:
             refresh_wire = st.button("🔄 Refresh", key="btn_refresh_wire", use_container_width=True)
 
@@ -804,7 +775,7 @@ with tab_news:
                 p_curr = item.get("primary_currency", "USD")
                 verdict = item.get("verdict", "⚪ Neutral (0)")
                 bias_val = item.get("bias", 0)
-                currs_badge = " · ".join([f"`{c}`" for c in item.get("currencies", [p_curr])])
+                currs_badge = " · ".join([f"**{c}**" for c in item.get("currencies", [p_curr])])
 
                 with st.container(border=True):
                     st.markdown(f"**{item['title']}**")
@@ -836,19 +807,13 @@ with tab_news:
                         if item.get("link") and item["link"] != "#":
                             st.link_button("🔗 Read Full", item["link"], use_container_width=True)
         else:
-            st.info("No breaking headlines cached yet. Click '🔄 Refresh' to pull live macro wire.")
+            st.caption("No breaking headlines cached yet. Click '🔄 Refresh' to pull live macro wire.")
 
     # ---------------------------------------------------------
     # RIGHT COLUMN: SMART-FILTERED ECONOMIC CALENDAR
     # ---------------------------------------------------------
     with col_calendar:
         st.markdown("#### 📅 Economic Calendar & Pre-News Shield")
-        st.info(
-            "🛡️ **Automated Pre-News Defense Rules:**\n\n"
-            "• **🔥 Tier-1 Super-Shield (FOMC, NFP, CPI, Rate Decisions):** 120m blackout before & after.\n"
-            "• **🔴 High-Impact Releases:** 60m blackout before & after.\n"
-            "• **🛡️ Auto Break-Even:** Open trades ≥ +0.5R are automatically locked at Break-Even prior to release."
-        )
 
         cal_ctrl1, cal_ctrl2 = st.columns(2)
         with cal_ctrl1:
@@ -917,7 +882,7 @@ with tab_news:
                     hide_index=True
                 )
             else:
-                st.info("No remaining events match the selected filters.")
+                st.caption("No remaining events match the selected filters.")
         else:
             st.caption("No economic events found in calendar feed.")
 
@@ -930,7 +895,7 @@ with tab_news:
             if st.button("🔍 Analyze Custom Text", use_container_width=True):
                 if h_text.strip():
                     ai_res = analyze_news_snippet(h_text, h_curr)
-                    st.markdown(f"**AI Recommendation:** `{ai_res['verdict']}`")
+                    st.markdown(f"**AI Recommendation:** **{ai_res['verdict']}**")
                     st.write(f"💡 {ai_res['advice']}")
                     if ai_res["bias"] != 0:
                         if st.button(f"⚡ Apply '{ai_res['verdict']}' to {h_curr}", key="btn_apply_ai_headline", type="primary"):
