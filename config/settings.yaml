@@ -93,10 +93,11 @@ risk:
   max_total_open_risk_pct: 6.5     # Max concurrent open at-risk exposure
   max_currency_exposure_pct: 4.5   # Net at-risk exposure on any single currency (max 2 correlated at-risk trades)
   pending_orders_enabled: true     # Use Limit orders on pullbacks & Stop orders on breakouts
-  pending_order_expiry_hours: 24   # Auto-cancel pending orders if unfilled after 24 hours (6 H4 candles)
+  pending_order_expiry_hours: 4    # Auto-cancel pending orders if unfilled after 4 hours (prevents overnight lingering)
+  cancel_pending_outside_session: true # Auto-cancel unfilled pending orders at session close (18:00 UTC) & Friday cutoff
   symbol_loss_cooldown_hours: 24   # Mandatory 24h lockout after a loss to prevent churn/revenge trading
-  daily_loss_limit_pct: 4.0
-  weekly_loss_limit_pct: 8.0
+  daily_loss_limit_pct: 4.0        # Hard daily portfolio circuit breaker (-4.0% closed loss in a day stops new entries)
+  weekly_loss_limit_pct: 8.0       # Hard weekly portfolio circuit breaker (-8.0% closed loss in a week stops new entries)
   drawdown_throttle_pct: 10.0      # from peak -> risk is halved
   kill_switch_drawdown_pct: 20.0   # from peak -> all trading stops
   high_volatility_risk_factor: 0.5
@@ -132,8 +133,8 @@ risk:
     freeze_start_utc_minute: 45
     freeze_end_utc_hour: 22
     freeze_end_utc_minute: 30
-  # No new forex entries on Friday after this hour (broker server time).
-  # Server time is usually UK time + 2 hours, so 18 = 16:00 UK.
+  # Friday Weekend-Gap Protection Cutoff (14:00 UTC = 15:00 WAT)
+  friday_cutoff_utc_hour: 14
   friday_cutoff_server_hour: 18
 
 # ---------------------------------------------------------------------

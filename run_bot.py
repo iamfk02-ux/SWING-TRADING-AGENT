@@ -121,16 +121,31 @@ def run_cycle(cycle_num: int = 1) -> int:
     open_positions = exec_agent.get_open_positions()
     raw_pending_orders = exec_agent.get_pending_orders()
 
-    # 0A. Clean up stale pending orders older than configured expiry (default: 24h)
-    expiry_hours = config.get("risk", {}).get("pending_order_expiry_hours", 24)
+    # 0A. Clean up stale pending orders (> 4h expiry, session close >= 18:00 UTC, or Friday cutoff >= 14:00 UTC)
+    expiry_hours = config.get("risk", {}).get("pending_order_expiry_hours", 4)
+    cancel_outside_session = config.get("risk", {}).get("cancel_pending_outside_session", True)
+    friday_cutoff_h = config.get("risk", {}).get("friday_cutoff_utc_hour", 14)
+    now_utc_dt = datetime.now(timezone.utc)
+    is_post_session = cancel_outside_session and (now_utc_dt.hour >= 18 or now_utc_dt.hour < 7)
+    is_friday_cutoff = cancel_outside_session and (now_utc_dt.weekday() == 4 and now_utc_dt.hour >= friday_cutoff_h)
+
     pending_orders = []
     current_time_sec = time.time()
     for pend in raw_pending_orders:
+        ticket = pend["ticket"]
+        p_sym = pend.get("symbol", "")
         setup_time = pend.get("time_setup", 0)
-        if setup_time > 0 and (current_time_sec - setup_time) > (expiry_hours * 3600):
-            ticket = pend["ticket"]
-            p_sym = pend.get("symbol", "")
-            age_h = (current_time_sec - setup_time) / 3600.0
+        age_h = (current_time_sec - setup_time) / 3600.0 if setup_time > 0 else 0.0
+
+        if is_friday_cutoff:
+            if exec_agent.cancel_pending_order(ticket):
+                append_live_log(f"🛡️ [FRIDAY CUTOFF SWEEP] Cancelled unfilled pending order #{ticket} on {p_sym} before weekend close.")
+                continue
+        elif is_post_session:
+            if exec_agent.cancel_pending_order(ticket):
+                append_live_log(f"🛡️ [SESSION CLOSE SWEEP] Cancelled unfilled pending order #{ticket} on {p_sym} ahead of overnight/rollover hours.")
+                continue
+        elif setup_time > 0 and age_h > expiry_hours:
             if exec_agent.cancel_pending_order(ticket):
                 append_live_log(f"⏰ [EXPIRED PENDING ORDER] Cancelled #{ticket} on {p_sym} (Age: {age_h:.1f}h > {expiry_hours}h limit).")
                 continue

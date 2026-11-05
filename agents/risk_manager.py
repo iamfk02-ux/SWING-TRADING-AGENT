@@ -45,10 +45,106 @@ class RiskManager:
 
         # Symbol Loss Lockout (Post-loss cooldown to prevent churn)
         self.symbol_loss_cooldown_hours = risk_cfg.get("symbol_loss_cooldown_hours", 24)
+        self.daily_loss_limit_pct = risk_cfg.get("daily_loss_limit_pct", 4.0)
+        self.weekly_loss_limit_pct = risk_cfg.get("weekly_loss_limit_pct", 8.0)
+        self.friday_cutoff_utc_hour = risk_cfg.get("friday_cutoff_utc_hour", 14)
 
         # Institutional Session Filter & Rollover Shield
         self.session_filter_cfg = risk_cfg.get("session_filter", {})
         self.rollover_shield_cfg = risk_cfg.get("rollover_shield", {})
+
+    def _get_and_update_peak_equity(self, account_equity: float, fallback_peak: float) -> float:
+        """
+        Tracks and persists true historical high-water mark (peak_equity) on disk.
+        Automatically resets if account scale changes by >3x (e.g. switching from demo to live).
+        """
+        import json
+        from pathlib import Path
+
+        state_path = Path(__file__).resolve().parent.parent / "data" / "peak_equity_state.json"
+        candidate_peak = max(float(account_equity or 0.0), float(fallback_peak or 0.0))
+        if candidate_peak <= 0:
+            return 0.0
+
+        saved_peak = 0.0
+        if state_path.exists():
+            try:
+                with open(state_path, "r") as f:
+                    data = json.load(f)
+                    saved_peak = float(data.get("peak_equity", 0.0) or 0.0)
+            except Exception:
+                saved_peak = 0.0
+
+        # If saved_peak is from a different account scale (e.g. $93k demo vs $305 live), reset cleanly
+        if saved_peak > (candidate_peak * 3.0) or saved_peak < (candidate_peak * 0.2):
+            true_peak = candidate_peak
+        else:
+            true_peak = max(saved_peak, candidate_peak)
+
+        if true_peak > saved_peak or saved_peak > (candidate_peak * 3.0):
+            try:
+                state_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(state_path, "w") as f:
+                    json.dump({
+                        "peak_equity": round(true_peak, 2),
+                        "updated_at": datetime.now(timezone.utc).isoformat()
+                    }, f, indent=2)
+            except Exception:
+                pass
+
+        return true_peak
+
+    def _check_period_loss_limits(self, account_equity: float, now_utc: datetime) -> Tuple[bool, str]:
+        """
+        Enforces hard Daily (-4.0%) and Weekly (-8.0%) portfolio loss circuit breakers
+        by summing realized PnL from trading_journal.db.
+        """
+        if account_equity <= 0:
+            return False, ""
+        try:
+            import sqlite3
+            from pathlib import Path
+            from datetime import timedelta
+            import pandas as pd
+
+            db_path = Path(__file__).resolve().parent.parent / "data" / "trading_journal.db"
+            if not db_path.exists():
+                return False, ""
+
+            with sqlite3.connect(db_path) as conn:
+                df = pd.read_sql_query(
+                    "SELECT exit_time, pnl_usd FROM trades WHERE exit_time IS NOT NULL AND pnl_usd IS NOT NULL ORDER BY id DESC LIMIT 100",
+                    conn
+                )
+            if df.empty:
+                return False, ""
+
+            df["exit_dt"] = pd.to_datetime(df["exit_time"], utc=True, errors="coerce")
+            df = df.dropna(subset=["exit_dt"])
+
+            # Filter out historical trades from a vastly different account scale (e.g. $93k demo vs $305 live)
+            df = df[df["pnl_usd"].abs() < (account_equity * 0.50)]
+            if df.empty:
+                return False, ""
+
+            day_start = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
+            week_start = day_start - timedelta(days=now_utc.weekday())
+
+            daily_pnl = float(df[df["exit_dt"] >= day_start]["pnl_usd"].sum())
+            weekly_pnl = float(df[df["exit_dt"] >= week_start]["pnl_usd"].sum())
+
+            if self.daily_loss_limit_pct > 0 and daily_pnl < 0:
+                daily_loss_pct = (abs(daily_pnl) / account_equity) * 100.0
+                if daily_loss_pct >= self.daily_loss_limit_pct:
+                    return True, f"DAILY LOSS CIRCUIT BREAKER: Realized loss today is -{daily_loss_pct:.1f}% (>= {self.daily_loss_limit_pct}% limit). Trading paused until tomorrow."
+
+            if self.weekly_loss_limit_pct > 0 and weekly_pnl < 0:
+                weekly_loss_pct = (abs(weekly_pnl) / account_equity) * 100.0
+                if weekly_loss_pct >= self.weekly_loss_limit_pct:
+                    return True, f"WEEKLY LOSS CIRCUIT BREAKER: Realized loss this week is -{weekly_loss_pct:.1f}% (>= {self.weekly_loss_limit_pct}% limit). Trading paused until Monday."
+        except Exception:
+            pass
+        return False, ""
 
     def _check_symbol_loss_cooldown(self, symbol: str) -> Tuple[bool, str]:
         """
@@ -203,6 +299,10 @@ class RiskManager:
         if now_utc.weekday() in (5, 6):
             return False, f"WEEKEND: {symbol} market is closed. Traditional markets resume Sunday 5:00 PM EST.", 0.0
 
+        # 0.005 Friday Afternoon Weekend-Gap Protection Cutoff
+        if now_utc.weekday() == 4 and now_utc.hour >= self.friday_cutoff_utc_hour:
+            return False, f"FRIDAY CUTOFF: No new entries after {self.friday_cutoff_utc_hour:02d}:00 UTC on Fridays to prevent weekend price gap risk.", 0.0
+
         # 0.01 Rollover Shield (Daily 5:00 PM EST interbank settlement freeze)
         in_rollover, rollover_reason = self._is_in_rollover_window(now_utc)
         if in_rollover:
@@ -262,13 +362,19 @@ class RiskManager:
             if is_blocked_news:
                 return False, f"NEWS SHIELD: {news_reason}", 0.0
 
-        # 1. Kill Switch Check
+        # 1. Persistent High-Water Mark (peak_equity) & Kill Switch Check
+        true_peak = self._get_and_update_peak_equity(account_equity, peak_equity)
         drawdown_pct = 0.0
-        if peak_equity > 0:
-            drawdown_pct = ((peak_equity - account_equity) / peak_equity) * 100.0
+        if true_peak > 0:
+            drawdown_pct = max(0.0, ((true_peak - account_equity) / true_peak) * 100.0)
 
         if drawdown_pct >= self.kill_switch_pct:
-            return False, f"KILL SWITCH ACTIVE: Drawdown {drawdown_pct:.1f}% >= {self.kill_switch_pct}%", 0.0
+            return False, f"KILL SWITCH ACTIVE: Drawdown {drawdown_pct:.1f}% >= {self.kill_switch_pct}% (Peak: ${true_peak:,.2f})", 0.0
+
+        # 1.5 Daily (-4%) & Weekly (-8%) Portfolio Loss Circuit Breakers
+        period_locked, period_reason = self._check_period_loss_limits(account_equity, now_utc)
+        if period_locked:
+            return False, period_reason, 0.0
 
         # 2. Maximum open AT-RISK positions (Free-Roll Slot Recycling: Break-Even runners don't consume risk slots)
         at_risk_positions = [p for p in open_positions if not self._is_position_risk_free(p)]
