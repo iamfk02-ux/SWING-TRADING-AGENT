@@ -130,11 +130,45 @@ def get_upcoming_economic_events(*args, **kwargs) -> List[Dict[str, Any]]:
     return filtered
 
 
+def get_watchlist_shield_status(watchlist_currencies: List[str] = None) -> Dict[str, Any]:
+    """
+    Evaluates real-time News Shield status across the active watchlist currencies.
+    Returns active blackout warnings and the next upcoming major release.
+    """
+    if watchlist_currencies is None:
+        watchlist_currencies = ["USD", "EUR", "GBP", "JPY", "AUD"]
+
+    events = get_upcoming_economic_events(force_refresh=False)
+    now_ts = datetime.now(timezone.utc).timestamp()
+
+    active_shields = []
+    upcoming_major = None
+
+    for ev in events:
+        curr = str(ev.get("country", "")).upper()
+        if curr not in watchlist_currencies:
+            continue
+
+        status_str = str(ev.get("status", ""))
+        is_major = ev.get("is_tier1", False) or ev.get("raw_impact") == "High"
+
+        if "Shield Active" in status_str and is_major:
+            active_shields.append(ev)
+        elif is_major and ev.get("sort_ts", 0) > now_ts and upcoming_major is None:
+            upcoming_major = ev
+
+    return {
+        "is_shield_engaged": len(active_shields) > 0,
+        "active_shields": active_shields,
+        "next_major_event": upcoming_major
+    }
+
+
 def analyze_news_snippet(text: str, currency: str) -> Dict[str, Any]:
     """
     Rule-based financial sentiment analyzer:
-    Examines text for hawkish/dovish keywords, rate decisions, inflation, and employment indicators.
-    Returns: plain-English explanation + suggested bias rating (-2 to +2).
+    Examines text for hawkish/dovish keywords, rate decisions, inflation, employment, and price momentum.
+    Returns: plain-English explanation + suggested bias rating (-1 to +1).
     """
     lower = text.lower()
     score = 0
@@ -143,46 +177,50 @@ def analyze_news_snippet(text: str, currency: str) -> Dict[str, Any]:
     # Bullish / Hawkish indicators
     bullish_terms = [
         "rate hike", "hikes rates", "hawkish", "raise rates", "higher than expected",
-        "beat expectations", "inflation rises", "strong jobs", "tight labor", "soars",
-        "economic boom", "growth accelerates", "gdp beats", "unemployment falls"
+        "beat expectations", "beats expectations", "inflation rises", "strong jobs", "tight labor",
+        "soars", "surges", "rallies", "climbs", "rebounds", "regains ground", "strengthens",
+        "advances", "gains", "upbeat", "optimism", "economic boom", "growth accelerates",
+        "gdp beats", "unemployment falls", "holds above", "breaks above", "firm"
     ]
     # Bearish / Dovish indicators
     bearish_terms = [
         "rate cut", "cuts rates", "dovish", "lower rates", "missed expectations",
-        "worse than expected", "inflation cools", "job losses", "recession",
-        "slowdown", "weak growth", "gdp contracts", "unemployment rises", "slumps"
+        "misses expectations", "worse than expected", "inflation cools", "job losses", "recession",
+        "slowdown", "weak growth", "gdp contracts", "unemployment rises", "slumps",
+        "drops", "falls", "slides", "retreats", "declines", "weakens", "loses ground",
+        "under pressure", "pressured", "sell-off", "stalls", "dips"
     ]
 
     for term in bullish_terms:
         if term in lower:
             score += 1
-            reasons.append(f"Bullish signal: found '{term}'")
+            reasons.append(f"Bullish signal: '{term}'")
 
     for term in bearish_terms:
         if term in lower:
             score -= 1
-            reasons.append(f"Bearish signal: found '{term}'")
+            reasons.append(f"Bearish signal: '{term}'")
 
     if score >= 2:
-        bias = 2
-        verdict = "Strong Bullish (+2)"
-        advice = f"Strong economic or monetary tailwind detected for {currency}. The bot will boost buy setups and block sell setups."
+        bias = 1
+        verdict = "🟢 Strong Bullish (+1)"
+        advice = f"Strong economic or monetary tailwind detected for {currency}. Boosts BUY setups and penalizes SELL setups."
     elif score == 1:
         bias = 1
-        verdict = "Bullish (+1)"
-        advice = f"Mild positive sentiment for {currency}. Buy signals receive higher confidence."
+        verdict = "🟢 Bullish (+1)"
+        advice = f"Positive sentiment detected for {currency}. BUY signals receive higher confidence."
     elif score <= -2:
-        bias = -2
-        verdict = "Strong Bearish (-2)"
-        advice = f"Substantial negative or dovish headwind detected for {currency}. The bot will prioritize short setups and cancel long setups."
+        bias = -1
+        verdict = "🔴 Strong Bearish (-1)"
+        advice = f"Substantial negative or dovish headwind detected for {currency}. Boosts SELL setups and penalizes BUY setups."
     elif score == -1:
         bias = -1
-        verdict = "Bearish (-1)"
-        advice = f"Mild negative sentiment for {currency}. Sell signals receive higher confidence."
+        verdict = "🔴 Bearish (-1)"
+        advice = f"Negative sentiment detected for {currency}. SELL signals receive higher confidence."
     else:
         bias = 0
-        verdict = "Neutral (0)"
-        advice = f"The news appears balanced or mixed. Keeping {currency} at Neutral (0) lets the technical indicators trade normally."
+        verdict = "⚪ Neutral (0)"
+        advice = f"Balanced or mixed headline for {currency}. Technical consensus remains unaffected."
 
     return {
         "currency": currency,

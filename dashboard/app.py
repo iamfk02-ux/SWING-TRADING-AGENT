@@ -690,60 +690,54 @@ with tab_history:
 
 # TAB 2: HUMAN NEWS DESK
 with tab_news:
-    st.subheader("🛡️ Automated News Shield & Fundamental Bias")
-    st.caption("Protect your trades from unpredictable news volatility and guide the bot's direction with your macro views.")
+    st.subheader("🛡️ Institutional News Shield & Macro Intelligence Desk")
+    st.caption("Real-time blackout protection, live breaking macro wire, and 1-click directional bias control for your 6 watchlist pairs.")
 
     import importlib
     import core.news_assistant
+    import core.news_feed
     importlib.reload(core.news_assistant)
-    from core.news_assistant import get_upcoming_economic_events, analyze_news_snippet
+    importlib.reload(core.news_feed)
+    from core.news_assistant import get_upcoming_economic_events, analyze_news_snippet, get_watchlist_shield_status
+    from core.news_feed import get_latest_financial_news
     from core.database import delete_news_bias, clear_all_news_biases
 
-    col_bias, col_calendar = st.columns([1, 1.2], gap="large")
+    WATCHLIST_CURRENCIES = ["USD", "EUR", "GBP", "JPY", "AUD"]
 
     # ---------------------------------------------------------
-    # LEFT COLUMN: DIRECT CURRENCY BIAS CONTROL
+    # TOP-LEVEL LIVE SHIELD STATUS BANNER
+    # ---------------------------------------------------------
+    shield_info = get_watchlist_shield_status(WATCHLIST_CURRENCIES)
+    if shield_info["is_shield_engaged"]:
+        active_list = shield_info["active_shields"]
+        alert_lines = [
+            f"• **{ev['country']} — {ev['title']}** ({ev['impact']}) | Status: `{ev['status']}`"
+            for ev in active_list
+        ]
+        st.error(
+            "🚨 **NEWS SHIELD ENGAGED — NEW ENTRIES BLOCKED ON AFFECTED PAIRS**\n\n"
+            + "\n".join(alert_lines)
+            + "\n\n*Open trades ≥ +0.5R on affected currencies are automatically protected at Break-Even.*"
+        )
+    else:
+        next_ev = shield_info.get("next_major_event")
+        next_txt = (
+            f"Next Watchlist Major: **{next_ev['country']} {next_ev['title']}** ({next_ev['impact']}) — `{next_ev['status']}` ({next_ev['date']})"
+            if next_ev else "No remaining High/Tier-1 releases scheduled for this week."
+        )
+        st.success(
+            f"🟢 **ALL CLEAR — NORMAL TECHNICAL EXECUTION ACTIVE** across all 6 watchlist pairs (`EURUSD`, `GBPUSD`, `USDJPY`, `AUDUSD`, `EURJPY`, `EURGBP`).\n\n"
+            f"📅 {next_txt}"
+        )
+
+    st.markdown("---")
+    col_bias, col_calendar = st.columns([1.05, 1.25], gap="large")
+
+    # ---------------------------------------------------------
+    # LEFT COLUMN: WATCHLIST BIAS & LIVE BREAKING NEWS WIRE
     # ---------------------------------------------------------
     with col_bias:
-        st.markdown("#### 🎯 Set Currency Bias")
-        st.write("Influence the bot's scoring directly without code. Setting a Bullish bias prioritizes buys; Bearish penalizes or blocks them.")
-
-        with st.form("quick_bias_form"):
-            b_col1, b_col2 = st.columns(2)
-            with b_col1:
-                bias_curr = st.selectbox(
-                    "Currency / Asset",
-                    ["USD", "EUR", "GBP", "JPY", "AUD", "CAD", "CHF", "NZD", "XAU"],
-                    key="bias_curr_select"
-                )
-            with b_col2:
-                bias_days = st.number_input("Days Active", min_value=1, max_value=14, value=3)
-
-            bias_stance = st.radio(
-                "Your Macro Bias:",
-                options=["🟢 Bullish (+1)", "⚪ Neutral (0)", "🔴 Bearish (-1)"],
-                horizontal=True,
-                index=0
-            )
-
-            bias_note = st.text_input("Optional Reason (e.g. 'Hawkish central bank', 'Strong GDP')", placeholder="Why this bias?")
-            submitted_bias = st.form_submit_button("💾 Save Macro Bias", use_container_width=True, type="primary")
-
-            if submitted_bias:
-                b_val = 1 if "Bullish" in bias_stance else (-1 if "Bearish" in bias_stance else 0)
-                expiry_dt = (datetime.now(timezone.utc) + timedelta(days=bias_days)).isoformat()
-                with sqlite3.connect(DB_PATH) as conn:
-                    cur = conn.cursor()
-                    cur.execute("""
-                        INSERT INTO news_bias (created_at, asset, bias, expires_at, note)
-                        VALUES (?, ?, ?, ?, ?)
-                    """, (datetime.now(timezone.utc).isoformat(), bias_curr, b_val, expiry_dt, bias_note or "Manual input"))
-                    conn.commit()
-                st.success(f"✅ Set {bias_curr} to {bias_stance} for {bias_days} days!")
-                st.rerun()
-
-        st.markdown("---")
-        st.markdown("#### 📋 Currently Active Biases")
+        st.markdown("#### 🎯 Active Watchlist Macro Biases")
         if DB_PATH.exists():
             with sqlite3.connect(DB_PATH) as conn:
                 df_biases = pd.read_sql_query("""
@@ -759,53 +753,150 @@ with tab_news:
                         st.success("All active biases cleared!")
                         st.rerun()
                 else:
-                    st.info("No active currency biases set. The bot is running 100% on pure technical consensus.")
+                    st.info("No active currency biases set. Running 100% on pure technical consensus.")
+
+        with st.expander("➕ Set Manual Currency Bias Override", expanded=False):
+            with st.form("quick_bias_form"):
+                b_col1, b_col2 = st.columns(2)
+                with b_col1:
+                    bias_curr = st.selectbox(
+                        "Watchlist Currency",
+                        WATCHLIST_CURRENCIES,
+                        key="bias_curr_select"
+                    )
+                with b_col2:
+                    bias_days = st.number_input("Days Active", min_value=1, max_value=14, value=2)
+
+                bias_stance = st.radio(
+                    "Macro Stance:",
+                    options=["🟢 Bullish (+1)", "⚪ Neutral (0)", "🔴 Bearish (-1)"],
+                    horizontal=True,
+                    index=0
+                )
+
+                bias_note = st.text_input("Reason (e.g. 'Hawkish Fed', 'Weak UK GDP')", placeholder="Why this bias?")
+                submitted_bias = st.form_submit_button("💾 Save Macro Bias", use_container_width=True, type="primary")
+
+                if submitted_bias:
+                    b_val = 1 if "Bullish" in bias_stance else (-1 if "Bearish" in bias_stance else 0)
+                    expiry_dt = (datetime.now(timezone.utc) + timedelta(days=bias_days)).isoformat()
+                    with sqlite3.connect(DB_PATH) as conn:
+                        cur = conn.cursor()
+                        cur.execute("""
+                            INSERT INTO news_bias (created_at, asset, bias, expires_at, note)
+                            VALUES (?, ?, ?, ?, ?)
+                        """, (datetime.now(timezone.utc).isoformat(), bias_curr, b_val, expiry_dt, bias_note or "Manual desk override"))
+                        conn.commit()
+                    st.success(f"✅ Set {bias_curr} to {bias_stance} for {bias_days} days!")
+                    st.rerun()
+
+        st.markdown("---")
+        wire_hdr1, wire_hdr2 = st.columns([3, 1])
+        with wire_hdr1:
+            st.markdown("#### ⚡ Live Breaking Macro Wire")
+            st.caption("Auto-filtered for `USD`, `EUR`, `GBP`, `JPY`, `AUD` with 1-click AI sentiment bias.")
+        with wire_hdr2:
+            refresh_wire = st.button("🔄 Refresh", key="btn_refresh_wire", use_container_width=True)
+
+        news_items = get_latest_financial_news(limit=6, force_refresh=refresh_wire, watchlist_only=True)
+        if news_items:
+            for idx, item in enumerate(news_items):
+                p_curr = item.get("primary_currency", "USD")
+                verdict = item.get("verdict", "⚪ Neutral (0)")
+                bias_val = item.get("bias", 0)
+                currs_badge = " · ".join([f"`{c}`" for c in item.get("currencies", [p_curr])])
+
+                with st.container(border=True):
+                    st.markdown(f"**{item['title']}**")
+                    st.caption(f"🕒 {item.get('date', 'Live')}  |  Affected: {currs_badge}  |  AI Rating: **{verdict}**")
+                    if item.get("summary"):
+                        st.write(item["summary"])
+
+                    btn_col1, btn_col2 = st.columns([2.2, 1])
+                    with btn_col1:
+                        if bias_val != 0:
+                            if st.button(
+                                f"⚡ Apply {verdict} to {p_curr} (48h)",
+                                key=f"wire_apply_{idx}",
+                                use_container_width=True
+                            ):
+                                exp_dt = (datetime.now(timezone.utc) + timedelta(days=2)).isoformat()
+                                with sqlite3.connect(DB_PATH) as conn:
+                                    cur = conn.cursor()
+                                    cur.execute("""
+                                        INSERT INTO news_bias (created_at, asset, bias, expires_at, note)
+                                        VALUES (?, ?, ?, ?, ?)
+                                    """, (datetime.now(timezone.utc).isoformat(), p_curr, bias_val, exp_dt, f"Live Wire: {item['title'][:55]}"))
+                                    conn.commit()
+                                st.success(f"Applied {verdict} to {p_curr} for 48h!")
+                                st.rerun()
+                        else:
+                            st.caption("💡 Neutral headline — no directional bias change needed.")
+                    with btn_col2:
+                        if item.get("link") and item["link"] != "#":
+                            st.link_button("🔗 Read Full", item["link"], use_container_width=True)
+        else:
+            st.info("No breaking headlines cached yet. Click '🔄 Refresh' to pull live macro wire.")
 
     # ---------------------------------------------------------
-    # RIGHT COLUMN: LIVE CALENDAR & PRE-NEWS SHIELD
+    # RIGHT COLUMN: SMART-FILTERED ECONOMIC CALENDAR
     # ---------------------------------------------------------
     with col_calendar:
-        st.markdown("#### 📅 Live Economic Calendar & News Shield")
+        st.markdown("#### 📅 Economic Calendar & Pre-News Shield")
         st.info(
-            "🛡️ **Automated News Shield Active:**\n\n"
-            "• **🔥 Tier-1 Super-Shield (FOMC, NFP, CPI, Rate Decisions):** 120m blackout before & after releases.\n"
-            "• **🔴 High-Impact Releases:** 60m blackout before & after releases.\n"
-            "• **🛡️ Automated Defense:** In-profit trades (≥ +0.5R) are auto-moved to Break-Even."
+            "🛡️ **Automated Pre-News Defense Rules:**\n\n"
+            "• **🔥 Tier-1 Super-Shield (FOMC, NFP, CPI, Rate Decisions):** 120m blackout before & after.\n"
+            "• **🔴 High-Impact Releases:** 60m blackout before & after.\n"
+            "• **🛡️ Auto Break-Even:** Open trades ≥ +0.5R are automatically locked at Break-Even prior to release."
         )
 
-        cal_ctrl1, cal_ctrl2, cal_ctrl3 = st.columns([1.2, 1.2, 0.7])
+        cal_ctrl1, cal_ctrl2 = st.columns(2)
         with cal_ctrl1:
-            impact_filter = st.selectbox(
-                "Filter Events:",
-                ["🔥 Tier-1 & High Only", "🔥 Tier-1 Super-Events Only", "All Scheduled (High & Medium)"],
-                key="cal_impact_filter"
+            curr_scope = st.selectbox(
+                "Currency Scope:",
+                ["🎯 Watchlist Only (USD, EUR, GBP, JPY, AUD)", "🌐 All Global Currencies"],
+                index=0,
+                key="cal_curr_scope"
             )
         with cal_ctrl2:
+            impact_filter = st.selectbox(
+                "Impact Level:",
+                ["🔥 Tier-1 & High Only", "🔥 Tier-1 Super-Events Only", "All Scheduled (High & Medium)"],
+                index=0,
+                key="cal_impact_filter"
+            )
+
+        cal_ctrl3, cal_ctrl4 = st.columns([2, 1])
+        with cal_ctrl3:
             time_filter = st.selectbox(
                 "Time Window:",
-                ["All Week", "Today & Upcoming Only"],
+                ["Today & Upcoming Only", "All Week"],
+                index=0,
                 key="cal_time_filter"
             )
-        with cal_ctrl3:
+        with cal_ctrl4:
             st.write("")
-            refresh_cal = st.button("🔄 Sync", key="btn_sync_cal", use_container_width=True, help="Force refresh from ForexFactory feed")
+            refresh_cal = st.button("🔄 Sync Calendar", key="btn_sync_cal", use_container_width=True, help="Force refresh from ForexFactory feed")
 
         events = get_upcoming_economic_events(force_refresh=refresh_cal)
         if events:
             df_ev = pd.DataFrame(events)
 
-            # Apply Impact Filter
+            # 1. Apply Watchlist Currency Filter (removes CNY, NZD, CHF, CAD noise by default)
+            if "Watchlist Only" in curr_scope:
+                df_ev = df_ev[df_ev["country"].str.upper().isin(WATCHLIST_CURRENCIES)]
+
+            # 2. Apply Impact Filter
             if impact_filter == "🔥 Tier-1 Super-Events Only":
                 df_ev = df_ev[df_ev["is_tier1"] == True]
             elif impact_filter == "🔥 Tier-1 & High Only":
                 df_ev = df_ev[(df_ev["is_tier1"] == True) | (df_ev["raw_impact"] == "High")]
 
-            # Apply Time Filter
+            # 3. Apply Time Filter
             if time_filter == "Today & Upcoming Only":
                 today_start_ts = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0).timestamp()
                 df_ev = df_ev[df_ev["sort_ts"] >= today_start_ts]
 
-            # Rename columns for clear presentation
             rename_map = {
                 "country": "Currency",
                 "title": "Release / Event",
@@ -822,36 +913,37 @@ with tab_news:
                 st.dataframe(
                     df_display_cal[display_cols],
                     use_container_width=True,
-                    height=280,
+                    height=380,
                     hide_index=True
                 )
             else:
-                st.info("No events match the selected filters.")
+                st.info("No remaining events match the selected filters.")
         else:
             st.caption("No economic events found in calendar feed.")
 
         st.markdown("---")
-        with st.expander("🧠 Quick Headline AI Impact Analyzer (Paste News Text)", expanded=False):
-            st.caption("Paste any breaking headline or central bank speech to let the assistant decode it and give you an instant recommendation.")
-            h_curr = st.selectbox("Currency Affected", ["USD", "EUR", "GBP", "JPY", "AUD", "CAD", "CHF", "NZD", "XAU"], key="h_curr_box")
-            h_text = st.text_area("Paste headline / text:", height=75, placeholder="e.g. US Core CPI rises 0.4% higher than expected...", key="h_text_area")
+        with st.expander("🧠 Custom Text / Central Bank Speech Analyzer", expanded=False):
+            st.caption("Paste any custom central bank statement or snippet to decode its directional impact.")
+            h_curr = st.selectbox("Currency Affected", WATCHLIST_CURRENCIES, key="h_curr_box")
+            h_text = st.text_area("Paste headline / text:", height=75, placeholder="e.g. ECB President Lagarde signals inflation remains sticky...", key="h_text_area")
             
-            if st.button("🔍 Analyze Impact", use_container_width=True):
+            if st.button("🔍 Analyze Custom Text", use_container_width=True):
                 if h_text.strip():
                     ai_res = analyze_news_snippet(h_text, h_curr)
                     st.markdown(f"**AI Recommendation:** `{ai_res['verdict']}`")
                     st.write(f"💡 {ai_res['advice']}")
-                    if st.button(f"⚡ Apply '{ai_res['verdict']}' to {h_curr}", key="btn_apply_ai_headline", type="primary"):
-                        exp_dt = (datetime.now(timezone.utc) + timedelta(days=3)).isoformat()
-                        with sqlite3.connect(DB_PATH) as conn:
-                            cur = conn.cursor()
-                            cur.execute("""
-                                INSERT INTO news_bias (created_at, asset, bias, expires_at, note)
-                                VALUES (?, ?, ?, ?, ?)
-                            """, (datetime.now(timezone.utc).isoformat(), h_curr, ai_res["bias"], exp_dt, f"AI Headline: {h_text[:50]}..."))
-                            conn.commit()
-                        st.success(f"Applied {ai_res['verdict']} to {h_curr}!")
-                        st.rerun()
+                    if ai_res["bias"] != 0:
+                        if st.button(f"⚡ Apply '{ai_res['verdict']}' to {h_curr}", key="btn_apply_ai_headline", type="primary"):
+                            exp_dt = (datetime.now(timezone.utc) + timedelta(days=2)).isoformat()
+                            with sqlite3.connect(DB_PATH) as conn:
+                                cur = conn.cursor()
+                                cur.execute("""
+                                    INSERT INTO news_bias (created_at, asset, bias, expires_at, note)
+                                    VALUES (?, ?, ?, ?, ?)
+                                """, (datetime.now(timezone.utc).isoformat(), h_curr, ai_res["bias"], exp_dt, f"Custom AI: {h_text[:50]}..."))
+                                conn.commit()
+                            st.success(f"Applied {ai_res['verdict']} to {h_curr}!")
+                            st.rerun()
 
 # TAB 3: DECISION LOG
 with tab_signals:
