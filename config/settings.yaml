@@ -79,16 +79,16 @@ symbols:
 # RISK MANAGER  (hard rules - the optimizer can never change these)
 # ---------------------------------------------------------------------
 risk:
-  risk_per_trade_pct: 1.0          # % of equity risked per trade
-  max_risk_per_trade_pct: 2.0      # hard cap, cannot be exceeded
+  risk_per_trade_pct: 2.0          # % of equity risked per trade (upgraded to 2.0% for smaller live capital growth)
+  max_risk_per_trade_pct: 2.5      # hard cap ceiling (allows lot-step rounding up to 2.5% max)
   max_open_positions: 3
-  max_total_open_risk_pct: 3.0
-  max_currency_exposure_pct: 2.0   # net risk on any single currency
+  max_total_open_risk_pct: 6.0     # 3 concurrent positions x 2.0% risk
+  max_currency_exposure_pct: 4.0   # net risk on any single currency (max 2 correlated trades)
   pending_orders_enabled: true     # Use Limit orders on pullbacks & Stop orders on breakouts
   pending_order_expiry_hours: 24   # Auto-cancel pending orders if unfilled after 24 hours (6 H4 candles)
   symbol_loss_cooldown_hours: 24   # Mandatory 24h lockout after a loss to prevent churn/revenge trading
-  daily_loss_limit_pct: 3.0
-  weekly_loss_limit_pct: 5.0
+  daily_loss_limit_pct: 4.0
+  weekly_loss_limit_pct: 8.0
   drawdown_throttle_pct: 10.0      # from peak -> risk is halved
   kill_switch_drawdown_pct: 20.0   # from peak -> all trading stops
   high_volatility_risk_factor: 0.5

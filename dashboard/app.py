@@ -321,9 +321,10 @@ with st.sidebar:
     min_score = config.get("scorer", {}).get("min_score_threshold", 0.70)
     st.markdown(f"• **Quality Filter:** `A+ Confluence (Score ≥ {min_score:.2f})`")
     st.markdown("• **Target Expectancy:** `Min 2.0R Target`")
+    risk_pct_cfg = config.get("risk", {}).get("risk_per_trade_pct", 2.0)
     st.markdown("• **Loss Cooldown:** `24h Churn Lockout`")
-    st.markdown("• **Market Hours:** `24/5 Forex & Metals`")
-    st.markdown("• **Risk Per Trade:** `1.0% Hard Cap`")
+    st.markdown("• **Session Filter:** `London & NY (07:00-17:00 UTC)`")
+    st.markdown(f"• **Risk Per Trade:** `{risk_pct_cfg:.1f}% Cap`")
 
     st.markdown("---")
     st.subheader("🔔 Telegram Alerts")

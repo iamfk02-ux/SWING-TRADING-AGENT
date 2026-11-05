@@ -18,10 +18,10 @@ class RiskManager:
     def __init__(self, config: Dict[str, Any]):
         self.config = config
         risk_cfg = config.get("risk", {})
-        self.risk_pct = risk_cfg.get("risk_per_trade_pct", 1.0)
-        self.max_risk_pct = risk_cfg.get("max_risk_per_trade_pct", 2.0)
+        self.risk_pct = risk_cfg.get("risk_per_trade_pct", 2.0)
+        self.max_risk_pct = risk_cfg.get("max_risk_per_trade_pct", 2.5)
         self.max_open_pos = risk_cfg.get("max_open_positions", 3)
-        self.max_currency_risk_pct = risk_cfg.get("max_currency_exposure_pct", 2.0)
+        self.max_currency_risk_pct = risk_cfg.get("max_currency_exposure_pct", 4.0)
         self.throttle_pct = risk_cfg.get("drawdown_throttle_pct", 10.0)
         self.kill_switch_pct = risk_cfg.get("kill_switch_drawdown_pct", 20.0)
         self.min_stop_loss_pips = risk_cfg.get("min_stop_loss_pips", 20.0)

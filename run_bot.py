@@ -217,7 +217,7 @@ def run_cycle(cycle_num: int = 1) -> int:
                             elif total_profit_usd < 0:
                                 analysis_text = (
                                     f"Trade was stopped out at `{exit_price:.5f}`. Market experienced a pullback/spread expansion past the dynamic ATR stop buffer (`{t_sl:.5f}`). "
-                                    f"Capital was strictly protected to initial 1% risk cap."
+                                    f"Capital was strictly protected to initial {config.get('risk', {}).get('risk_per_trade_pct', 2.0):.1f}% risk cap."
                                 )
                             else:
                                 if len(matching_deals) > 1:
