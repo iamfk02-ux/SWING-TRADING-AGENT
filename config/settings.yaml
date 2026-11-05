@@ -70,7 +70,7 @@ symbols:
     - GBPUSD
     - USDJPY
     - AUDUSD
-    - USDCAD
+    - EURJPY
     - EURGBP
   # Metals: set to empty list to disable metal trading
   metals: []
