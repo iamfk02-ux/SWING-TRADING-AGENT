@@ -19,9 +19,11 @@ class RiskManager:
         self.config = config
         risk_cfg = config.get("risk", {})
         self.risk_pct = risk_cfg.get("risk_per_trade_pct", 2.0)
-        self.max_risk_pct = risk_cfg.get("max_risk_per_trade_pct", 2.5)
+        self.max_risk_pct = risk_cfg.get("max_risk_per_trade_pct", 3.2)
         self.max_open_pos = risk_cfg.get("max_open_positions", 3)
-        self.max_currency_risk_pct = risk_cfg.get("max_currency_exposure_pct", 4.0)
+        self.max_currency_risk_pct = risk_cfg.get("max_currency_exposure_pct", 4.5)
+        self.free_roll_recycling = risk_cfg.get("free_roll_slot_recycling", True)
+        self.conviction_sizing_cfg = risk_cfg.get("conviction_sizing", {})
         self.throttle_pct = risk_cfg.get("drawdown_throttle_pct", 10.0)
         self.kill_switch_pct = risk_cfg.get("kill_switch_drawdown_pct", 20.0)
         self.min_stop_loss_pips = risk_cfg.get("min_stop_loss_pips", 20.0)
@@ -97,6 +99,27 @@ class RiskManager:
         if len(s) >= 6:
             return [s[:3], s[3:6]]
         return [s]
+
+    def _is_position_risk_free(self, pos: Dict[str, Any]) -> bool:
+        """
+        Determines if an open position's Stop Loss is already locked at or better than
+        Break-Even (0% downside capital risk). Such 'Free Runners' do not consume an at-risk slot.
+        """
+        if not self.free_roll_recycling:
+            return False
+
+        direction = str(pos.get("direction", "BUY")).upper()
+        entry = float(pos.get("entry_price", pos.get("entry", 0.0)) or 0.0)
+        sl = float(pos.get("sl", pos.get("stop_loss", 0.0)) or 0.0)
+
+        if entry <= 0 or sl <= 0:
+            return False
+
+        if direction == "BUY":
+            return sl >= entry
+        elif direction == "SELL":
+            return sl <= entry
+        return False
 
     def _is_in_rollover_window(self, now_utc: datetime) -> Tuple[bool, str]:
         """
@@ -247,10 +270,15 @@ class RiskManager:
         if drawdown_pct >= self.kill_switch_pct:
             return False, f"KILL SWITCH ACTIVE: Drawdown {drawdown_pct:.1f}% >= {self.kill_switch_pct}%", 0.0
 
-        # 2. Maximum open positions (positions + pending)
-        total_active_orders = len(open_positions) + len(pending_orders)
-        if total_active_orders >= self.max_open_pos:
-            return False, f"MAX POSITIONS REACHED: {total_active_orders}/{self.max_open_pos} (including pending)", 0.0
+        # 2. Maximum open AT-RISK positions (Free-Roll Slot Recycling: Break-Even runners don't consume risk slots)
+        at_risk_positions = [p for p in open_positions if not self._is_position_risk_free(p)]
+        total_at_risk_orders = len(at_risk_positions) + len(pending_orders)
+        if total_at_risk_orders >= self.max_open_pos:
+            return False, f"MAX AT-RISK POSITIONS REACHED: {total_at_risk_orders}/{self.max_open_pos} (Free runners excluded)", 0.0
+
+        # Hard portfolio cap including free runners (max 6 across watchlist)
+        if (len(open_positions) + len(pending_orders)) >= 6:
+            return False, "MAX TOTAL PORTFOLIO POSITIONS REACHED (6/6)", 0.0
 
         # 3. Duplicate check (1 trade/order per symbol)
         for pos in open_positions:
@@ -261,28 +289,40 @@ class RiskManager:
             if pend["symbol"].upper() == symbol:
                 return False, f"PENDING ORDER ALREADY ACTIVE FOR {symbol}", 0.0
 
-        # 3.5 Currency Correlation & Clustered Exposure Guard
-        # Prevents stacking multiple trades sharing the same base/quote currency (e.g. buying EURUSD, GBPUSD, AUDUSD simultaneously)
+        # 3.5 Currency Correlation & Clustered Exposure Guard (Evaluates only AT-RISK positions + pending)
+        # Once an existing trade's SL is at/past Break-Even, its currency downside risk is 0%
         candidate_currencies = self._get_currency_components(symbol)
         curr_counts = {}
-        all_committed = open_positions + pending_orders
-        for pos in all_committed:
+        all_at_risk_committed = at_risk_positions + pending_orders
+        for pos in all_at_risk_committed:
             for c in self._get_currency_components(pos.get("symbol", "")):
                 curr_counts[c] = curr_counts.get(c, 0) + 1
 
         for c in candidate_currencies:
             if curr_counts.get(c, 0) >= 2:
-                return False, f"CORRELATION LIMIT: Maximum exposure for currency '{c}' reached ({curr_counts[c]} active/pending)", 0.0
+                return False, f"CORRELATION LIMIT: Maximum at-risk exposure for currency '{c}' reached ({curr_counts[c]} at-risk/pending)", 0.0
 
         # 3.8 Symbol Loss Lockout (Post-loss cooldown to prevent churn)
         is_locked, cooldown_reason = self._check_symbol_loss_cooldown(symbol)
         if is_locked:
             return False, cooldown_reason, 0.0
 
-        # 4. Effective Risk calculation (Throttled if in drawdown or if strategy is degraded)
-        effective_risk_pct = self.risk_pct
+        # 4. Effective Risk calculation (Tiered A+ Conviction Sizing + Drawdown/Health Throttles)
+        score = float(signal.get("score", 0.78) or 0.78)
+        if self.conviction_sizing_cfg.get("enabled", True):
+            tier_b_max = self.conviction_sizing_cfg.get("tier_b_max_score", 0.74)
+            tier_a_max = self.conviction_sizing_cfg.get("tier_a_max_score", 0.84)
+            if score < (tier_b_max + 0.005):
+                effective_risk_pct = self.conviction_sizing_cfg.get("tier_b_risk_pct", 1.50)
+            elif score < (tier_a_max + 0.005):
+                effective_risk_pct = self.conviction_sizing_cfg.get("tier_a_risk_pct", 2.00)
+            else:
+                effective_risk_pct = self.conviction_sizing_cfg.get("tier_aplus_risk_pct", 2.75)
+        else:
+            effective_risk_pct = self.risk_pct
+
         if drawdown_pct >= self.throttle_pct:
-            effective_risk_pct = self.risk_pct * 0.5  # Halved to 0.5% on portfolio drawdown
+            effective_risk_pct *= 0.5  # Halved on portfolio drawdown
 
         # Rule 10: Apply strategy health multiplier
         strat_name = signal.get("strategy", "TREND")
@@ -291,6 +331,7 @@ class RiskManager:
             if health.get("risk_multiplier", 1.0) < 1.0:
                 effective_risk_pct *= health["risk_multiplier"]
 
+        signal["applied_risk_pct"] = round(effective_risk_pct, 2)
         risk_amount_usd = account_equity * (effective_risk_pct / 100.0)
 
         # 5. Position Sizing

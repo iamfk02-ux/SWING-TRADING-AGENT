@@ -79,11 +79,19 @@ symbols:
 # RISK MANAGER  (hard rules - the optimizer can never change these)
 # ---------------------------------------------------------------------
 risk:
-  risk_per_trade_pct: 2.0          # % of equity risked per trade (upgraded to 2.0% for smaller live capital growth)
-  max_risk_per_trade_pct: 2.5      # hard cap ceiling (allows lot-step rounding up to 2.5% max)
-  max_open_positions: 3
-  max_total_open_risk_pct: 6.0     # 3 concurrent positions x 2.0% risk
-  max_currency_exposure_pct: 4.0   # net risk on any single currency (max 2 correlated trades)
+  risk_per_trade_pct: 2.0          # Base % of equity risked per trade
+  max_risk_per_trade_pct: 3.2      # Hard cap ceiling (supports 2.75% A+ conviction sizing + lot-step rounding)
+  max_open_positions: 3            # Maximum concurrent AT-RISK positions
+  free_roll_slot_recycling: true   # Risk-Free trades (SL at/above Break-Even) become Free Runners & free up slots
+  conviction_sizing:
+    enabled: true
+    tier_b_max_score: 0.74
+    tier_b_risk_pct: 1.50          # Score 0.70 - 0.74: conservative 1.50% risk
+    tier_a_max_score: 0.84
+    tier_a_risk_pct: 2.00          # Score 0.75 - 0.84: standard 2.00% risk
+    tier_aplus_risk_pct: 2.75      # Score >= 0.85: A+ high-conviction 2.75% risk
+  max_total_open_risk_pct: 6.5     # Max concurrent open at-risk exposure
+  max_currency_exposure_pct: 4.5   # Net at-risk exposure on any single currency (max 2 correlated at-risk trades)
   pending_orders_enabled: true     # Use Limit orders on pullbacks & Stop orders on breakouts
   pending_order_expiry_hours: 24   # Auto-cancel pending orders if unfilled after 24 hours (6 H4 candles)
   symbol_loss_cooldown_hours: 24   # Mandatory 24h lockout after a loss to prevent churn/revenge trading
