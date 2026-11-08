@@ -54,11 +54,23 @@ def resolve_mt5_symbol(symbol: str) -> Optional[str]:
     candidates = aliases_map.get(symbol.upper(), [symbol])
     suffixes = ["", "m", ".c", "c", "t", "T", ".raw", ".pro", "_i", ".s"]
 
+    # Pass 1: Prefer symbols that have active trading enabled (critical for Exness where 'EURUSD' is view-only and 'EURUSDm' is tradable)
+    disabled_mode = getattr(mt5, "SYMBOL_TRADE_MODE_DISABLED", 0)
+    for cand in candidates:
+        for sfx in suffixes:
+            test_sym = f"{cand}{sfx}"
+            info = mt5.symbol_info(test_sym)
+            if info is not None and getattr(info, "trade_mode", 1) != disabled_mode:
+                mt5.symbol_select(test_sym, True)
+                return test_sym
+
+    # Pass 2: Fallback if market is closed / trade_mode temporarily 0
     for cand in candidates:
         for sfx in suffixes:
             test_sym = f"{cand}{sfx}"
             info = mt5.symbol_info(test_sym)
             if info is not None:
+                mt5.symbol_select(test_sym, True)
                 return test_sym
 
     return None

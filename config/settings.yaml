@@ -9,7 +9,7 @@
 # ---------------------------------------------------------------------
 account:
   # "cent" (recommended under $1,000) or "standard"
-  type: cent
+  type: standard
   # Starting balance used for backtests (in US dollars)
   backtest_starting_balance: 300
   # Commission per 1 standard lot, round trip, in USD (0 for most cent/standard accounts)

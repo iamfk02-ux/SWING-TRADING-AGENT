@@ -239,6 +239,15 @@ class TradeManager:
                     notifier.notify_partial_tp(sym, close_vol, rem_vol, current_price, pnl_usd_est, final_sl)
                     current_vol = rem_vol
                     sl = final_sl
+            else:
+                # Standard account 0.01 minimum lot fallback: lock in +0.45R guaranteed profit on the full lot
+                lock_045 = round(entry + (0.45 * risk_dist), sym_digits) if direction == "BUY" else round(entry - (0.45 * risk_dist), sym_digits)
+                needs_045 = (sl < lock_045) if direction == "BUY" else (sl == 0 or sl > lock_045)
+                if needs_045 and exec_agent.modify_stop_loss(ticket, lock_045):
+                    sl = lock_045
+                    self.state[ticket_str]["partial_tp_taken"] = True
+                    self._save_state()
+                    logger_func(f"🔒 [MIN-LOT PROFIT LOCK] {sym} #{ticket} ({current_vol} lot) reached +{current_r}R! Stop Loss locked at +0.45R ({lock_045:.5f}).")
 
         # -------------------------------------------------------------
         # STEP 3: STEP-LOCK GUARANTEED PROFIT (+1.5R -> Lock +0.6R)
