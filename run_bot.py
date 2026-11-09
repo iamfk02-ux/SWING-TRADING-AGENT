@@ -112,6 +112,8 @@ def run_cycle(cycle_num: int = 1) -> int:
     mean_rev_agent = MeanReversionAgent(config)
     scorer = SignalScorer(config)
     risk_manager = RiskManager(config)
+    if equity > 0:
+        risk_manager._update_and_get_peak_equity(equity)
 
     from agents.consensus_engine import ConsensusEngine
     from core.circuit_breaker import CircuitBreaker
@@ -274,20 +276,6 @@ def run_cycle(cycle_num: int = 1) -> int:
                                 entry_price=t_entry,
                                 exit_price=exit_price,
                                 profit_usd=total_profit_usd,
-                                exit_reason=exit_reason,
-                                analysis_explanation=analysis_text
-                            )
-                            conn.commit()
-
-                            # Dispatch alerts and live log
-                            append_live_log(f"📋 [TRADE REPORT] Closed #{t_ticket} ({t_sym} {t_dir}) | PnL: ${profit_usd:+,.2f} ({pnl_r}R) | Reason: {exit_reason}")
-                            notifier.notify_trade_closed(
-                                symbol=t_sym,
-                                direction=t_dir,
-                                lots=t_lots,
-                                entry_price=t_entry,
-                                exit_price=exit_price,
-                                profit_usd=profit_usd,
                                 exit_reason=exit_reason,
                                 analysis_explanation=analysis_text
                             )
@@ -611,8 +599,6 @@ def run_cycle(cycle_num: int = 1) -> int:
                     else:
                         action_badge = "⚠️ RISK REJECTED"
                         append_live_log(f"⚠️ [{actual_sym}] Trade Rejected by Risk Manager: {reason}")
-                        action_badge = "⚠️ RISK REJECTED"
-                        append_live_log(f"⚠️ [{actual_sym}] Trade Rejected by Risk Manager: {reason}")
 
         scanner_matrix_rows.append({
             "symbol": actual_sym,
@@ -640,7 +626,7 @@ def run_cycle(cycle_num: int = 1) -> int:
         timeframe=timeframe
     )
     append_live_log(f"✅ Cycle #{cycle_num} finished. {scanned_count} active symbols analyzed. 0 errors.")
-    return scanned_count
+    return scanned_count, len(open_positions), balance, equity
 
 
 def main():
@@ -660,11 +646,18 @@ def main():
     append_live_log("Cycle Interval: 5 Minutes (300 seconds)")
 
     cycle_count = 0
+    last_active_pos = 0
+    last_balance = 0.0
+    last_equity = 0.0
     try:
         while True:
             cycle_count += 1
             try:
-                scanned = run_cycle(cycle_count)
+                res = run_cycle(cycle_count)
+                if isinstance(res, tuple):
+                    scanned, last_active_pos, last_balance, last_equity = res
+                else:
+                    scanned = int(res or 0)
             except Exception as e:
                 append_live_log(f"Error in cycle #{cycle_count}: {e}", level="ERROR")
                 scanned = 0
@@ -692,9 +685,9 @@ def main():
                     next_cycle_time=next_scan.strftime("%Y-%m-%d %H:%M:%S"),
                     seconds_remaining=sec_left,
                     scanned_count=scanned,
-                    active_positions=0,
-                    balance=100000.0,
-                    equity=100000.0,
+                    active_positions=last_active_pos,
+                    balance=last_balance,
+                    equity=last_equity,
                     timeframe=timeframe
                 )
                 time.sleep(5)
