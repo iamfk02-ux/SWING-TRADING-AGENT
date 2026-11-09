@@ -113,7 +113,7 @@ def run_cycle(cycle_num: int = 1) -> int:
     scorer = SignalScorer(config)
     risk_manager = RiskManager(config)
     if equity > 0:
-        risk_manager._update_and_get_peak_equity(equity)
+        risk_manager._get_and_update_peak_equity(equity, balance)
 
     from agents.consensus_engine import ConsensusEngine
     from core.circuit_breaker import CircuitBreaker
