@@ -258,6 +258,59 @@ class ExecutionAgent:
             print(f"[PARTIAL TP FAILED] #{ticket}: {err}")
             return False
 
+    def close_position(self, ticket: int, reason_comment: str = "TG_MANUAL_CLOSE") -> Tuple[bool, float, str]:
+        """Closes 100% of an open position in MT5 at current market price."""
+        if not self.is_connected and not self.connect():
+            return False, 0.0, "MT5 not connected"
+
+        position = mt5.positions_get(ticket=ticket)
+        if not position or len(position) == 0:
+            return False, 0.0, f"Position #{ticket} not found or already closed"
+
+        pos = position[0]
+        sym = pos.symbol
+        vol = float(pos.volume)
+        est_profit = float(getattr(pos, "profit", 0.0) + getattr(pos, "swap", 0.0))
+
+        tick = mt5.symbol_info_tick(sym)
+        if not tick:
+            return False, 0.0, f"No tick data for {sym}"
+
+        close_type = mt5.ORDER_TYPE_SELL if pos.type == mt5.ORDER_TYPE_BUY else mt5.ORDER_TYPE_BUY
+        price = tick.bid if pos.type == mt5.ORDER_TYPE_BUY else tick.ask
+
+        info = mt5.symbol_info(sym)
+        digits = info.digits if (info and info.digits is not None) else 5
+
+        filling_type = mt5.ORDER_FILLING_IOC
+        if info:
+            if info.filling_mode & 1:
+                filling_type = mt5.ORDER_FILLING_FOK
+            elif info.filling_mode & 2:
+                filling_type = mt5.ORDER_FILLING_IOC
+            else:
+                filling_type = mt5.ORDER_FILLING_RETURN
+
+        request = {
+            "action": mt5.TRADE_ACTION_DEAL,
+            "position": int(ticket),
+            "symbol": sym,
+            "volume": vol,
+            "type": close_type,
+            "price": float(round(price, digits)),
+            "deviation": 20,
+            "magic": 10102026,
+            "comment": reason_comment[:31],
+            "type_time": mt5.ORDER_TIME_GTC,
+            "type_filling": filling_type
+        }
+        res = mt5.order_send(request)
+        if res and res.retcode == mt5.TRADE_RETCODE_DONE:
+            return True, est_profit, f"Closed {vol:.2f} lots on {sym} (#{ticket}) @ {price:.5f}"
+        else:
+            err = res.comment if res else str(mt5.last_error())
+            return False, 0.0, f"Close rejected: {err}"
+
     def get_open_positions(self) -> List[Dict[str, Any]]:
         """Returns all open MT5 positions placed by this agent."""
         if not self.is_connected and not self.connect():
@@ -278,9 +331,11 @@ class ExecutionAgent:
                 "direction": "BUY" if p.type == mt5.ORDER_TYPE_BUY else "SELL",
                 "volume": p.volume,
                 "entry_price": p.price_open,
+                "current_price": getattr(p, "price_current", p.price_open),
                 "sl": p.sl,
                 "tp": p.tp,
                 "profit": p.profit,
+                "swap": getattr(p, "swap", 0.0),
                 "magic": p.magic
             })
         return pos_list

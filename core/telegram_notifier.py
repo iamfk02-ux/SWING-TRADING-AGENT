@@ -23,26 +23,43 @@ class TelegramNotifier:
         self.bot_token = tg_cfg.get("bot_token", "")
         self.chat_id = tg_cfg.get("chat_id", "")
 
-    def send_message(self, text: str) -> bool:
+    def send_message(self, text: str, reply_markup: Optional[Dict[str, Any]] = None) -> bool:
         if not self.enabled or not self.bot_token or not self.chat_id:
             return False
         try:
             url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"
-            payload = {
+            payload: Dict[str, Any] = {
                 "chat_id": self.chat_id,
                 "text": text,
                 "parse_mode": "Markdown"
             }
+            if reply_markup is not None:
+                payload["reply_markup"] = reply_markup
             res = requests.post(url, json=payload, timeout=20)
             return res.status_code == 200
         except Exception as e:
             print(f"[TELEGRAM ERROR] Could not dispatch alert: {e}")
             return False
 
-    def notify_trade_opened(self, symbol: str, direction: str, lots: float, entry: float, sl: float, tp: Optional[float], strategy: str, score: float):
+    def notify_trade_opened(
+        self,
+        symbol: str,
+        direction: str,
+        lots: float,
+        entry: float,
+        sl: float,
+        tp: Optional[float],
+        strategy: str,
+        score: float,
+        ticket: Optional[int] = None,
+        order_type: str = "MARKET"
+    ):
+        title = "🚀 *TRADE OPENED*" if order_type.upper() == "MARKET" else f"⏳ *{order_type.upper()} ORDER PLACED*"
+        ticket_line = f"🎫 *Ticket:* `#{ticket}`\n" if ticket else ""
         msg = (
-            f"🚀 *TRADE OPENED*\n"
+            f"{title}\n"
             f"━━━━━━━━━━━━━━━━━━\n"
+            f"{ticket_line}"
             f"📈 *Symbol:* `{symbol}`\n"
             f"🎯 *Strategy:* `{strategy}`\n"
             f"🔄 *Direction:* *{direction}*\n"
@@ -53,7 +70,28 @@ class TelegramNotifier:
             f"⭐ *Score:* `{score:.2f}`\n"
             f"━━━━━━━━━━━━━━━━━━"
         )
-        self.send_message(msg)
+        markup = None
+        if ticket:
+            if order_type.upper() in ("LIMIT", "STOP"):
+                markup = {
+                    "inline_keyboard": [
+                        [
+                            {"text": f"🚫 Cancel Order #{ticket}", "callback_data": f"cancel:{ticket}"},
+                            {"text": "💼 All Positions", "callback_data": "cmd:positions"}
+                        ]
+                    ]
+                }
+            else:
+                markup = {
+                    "inline_keyboard": [
+                        [
+                            {"text": "🛡️ Break-Even", "callback_data": f"be:{ticket}"},
+                            {"text": "💰 Close 50%", "callback_data": f"half:{ticket}"},
+                            {"text": "❌ Close 100%", "callback_data": f"close:{ticket}"}
+                        ]
+                    ]
+                }
+        self.send_message(msg, reply_markup=markup)
 
     def notify_breakeven(self, symbol: str, new_sl: float):
         msg = (

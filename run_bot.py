@@ -554,51 +554,58 @@ def run_cycle(cycle_num: int = 1) -> int:
                 append_live_log(f"⚡ [{actual_sym}] SETUP DETECTED! Strategy: {signal['strategy']} on {tf_label} {signal['direction']} | Final Score: {score:.2f} (News Modifier: {news_mod:.2f} - {news_note})")
 
                 if scorer.is_eligible(score):
-                    approved, reason, lots = risk_manager.evaluate_order(
-                        signal, equity, balance, open_positions, pending_orders=pending_orders
-                    )
-                    signal["status"] = "APPROVED" if approved else "REJECTED_BY_RISK"
-                    signal["rejection_reason"] = reason
-                    log_signal(signal)
-
-                    order_type_str = signal.get("order_type", "MARKET")
-                    expiry_h = config.get("risk", {}).get("pending_order_expiry_hours", 24)
-
-                    if approved:
-                        action_badge = "🚀 ORDER PLACED"
-                        target_entry_txt = f"{signal['entry']:.5f} ({order_type_str})" if order_type_str != "MARKET" else "Market"
-                        append_live_log(f"✅ [{actual_sym}] RISK APPROVED! Placing {order_type_str} {lots} lots on {tf_label} @ {target_entry_txt} | SL: {signal['stop_loss']:.5f} | TP: {signal.get('take_profit') or 'Trailing'}")
-                        ticket = exec_agent.place_order(
-                            symbol=actual_sym,
-                            direction=signal["direction"],
-                            lots=lots,
-                            stop_loss=signal["stop_loss"],
-                            take_profit=signal.get("take_profit"),
-                            strategy_name=f"{signal['strategy']}_{tf_label}",
-                            order_type_str=order_type_str,
-                            entry_price=signal.get("entry"),
-                            expiration_hours=expiry_h
-                        )
-                        if ticket:
-                            circuit_breaker.record_execution_success()
-                            append_live_log(f"🎉 [{actual_sym}] Live {order_type_str} ({tf_label}) Order Placed in MT5! Ticket #{ticket} (Auto-exp: {expiry_h}h)")
-                            notifier.notify_trade_opened(
-                                symbol=actual_sym,
-                                direction=f"{signal['direction']} ({order_type_str} - {tf_label})",
-                                lots=lots,
-                                entry=signal["entry"],
-                                sl=signal["stop_loss"],
-                                tp=signal.get("take_profit"),
-                                strategy=f"{signal['strategy']} [{tf_label}]",
-                                score=score
-                            )
-                        else:
-                            tripped = circuit_breaker.record_execution_error("Order placement rejected by MT5 terminal.")
-                            if tripped:
-                                append_live_log(f"🚨 [CIRCUIT BREAKER TRIPPED] Order placement halted due to repeated broker rejections.", level="ERROR")
+                    from core.telegram_controller import is_entries_paused
+                    if is_entries_paused():
+                        action_badge = "⏸️ ENTRIES PAUSED"
+                        append_live_log(f"⏸️ [{actual_sym}] Signal skipped: New trade entries are paused via Telegram Mobile Control.")
                     else:
-                        action_badge = "⚠️ RISK REJECTED"
-                        append_live_log(f"⚠️ [{actual_sym}] Trade Rejected by Risk Manager: {reason}")
+                        approved, reason, lots = risk_manager.evaluate_order(
+                            signal, equity, balance, open_positions, pending_orders=pending_orders
+                        )
+                        signal["status"] = "APPROVED" if approved else "REJECTED_BY_RISK"
+                        signal["rejection_reason"] = reason
+                        log_signal(signal)
+
+                        order_type_str = signal.get("order_type", "MARKET")
+                        expiry_h = config.get("risk", {}).get("pending_order_expiry_hours", 24)
+
+                        if approved:
+                            action_badge = "🚀 ORDER PLACED"
+                            target_entry_txt = f"{signal['entry']:.5f} ({order_type_str})" if order_type_str != "MARKET" else "Market"
+                            append_live_log(f"✅ [{actual_sym}] RISK APPROVED! Placing {order_type_str} {lots} lots on {tf_label} @ {target_entry_txt} | SL: {signal['stop_loss']:.5f} | TP: {signal.get('take_profit') or 'Trailing'}")
+                            ticket = exec_agent.place_order(
+                                symbol=actual_sym,
+                                direction=signal["direction"],
+                                lots=lots,
+                                stop_loss=signal["stop_loss"],
+                                take_profit=signal.get("take_profit"),
+                                strategy_name=f"{signal['strategy']}_{tf_label}",
+                                order_type_str=order_type_str,
+                                entry_price=signal.get("entry"),
+                                expiration_hours=expiry_h
+                            )
+                            if ticket:
+                                circuit_breaker.record_execution_success()
+                                append_live_log(f"🎉 [{actual_sym}] Live {order_type_str} ({tf_label}) Order Placed in MT5! Ticket #{ticket} (Auto-exp: {expiry_h}h)")
+                                notifier.notify_trade_opened(
+                                    symbol=actual_sym,
+                                    direction=f"{signal['direction']} ({order_type_str} - {tf_label})",
+                                    lots=lots,
+                                    entry=signal["entry"],
+                                    sl=signal["stop_loss"],
+                                    tp=signal.get("take_profit"),
+                                    strategy=f"{signal['strategy']} [{tf_label}]",
+                                    score=score,
+                                    ticket=ticket,
+                                    order_type=order_type_str
+                                )
+                            else:
+                                tripped = circuit_breaker.record_execution_error("Order placement rejected by MT5 terminal.")
+                                if tripped:
+                                    append_live_log(f"🚨 [CIRCUIT BREAKER TRIPPED] Order placement halted due to repeated broker rejections.", level="ERROR")
+                        else:
+                            action_badge = "⚠️ RISK REJECTED"
+                            append_live_log(f"⚠️ [{actual_sym}] Trade Rejected by Risk Manager: {reason}")
 
         scanner_matrix_rows.append({
             "symbol": actual_sym,
@@ -644,6 +651,15 @@ def main():
     append_live_log(f"Active Timeframe: {timeframe} Candles (Lower Timeframe Scanning)")
     append_live_log("Market Coverage: Forex & Metals (XAUUSD) - 24/5")
     append_live_log("Cycle Interval: 5 Minutes (300 seconds)")
+
+    # Launch 2-Way Interactive Telegram Mobile Controller
+    tg_controller = None
+    try:
+        from core.telegram_controller import TelegramController
+        tg_controller = TelegramController(config)
+        tg_controller.start_background_listener(announce_startup=True)
+    except Exception as e:
+        append_live_log(f"Telegram controller init warning: {e}", level="WARNING")
 
     cycle_count = 0
     last_active_pos = 0
