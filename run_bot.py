@@ -715,12 +715,12 @@ def main():
     append_live_log("Market Coverage: Forex & Metals (XAUUSD) - 24/5")
     append_live_log("Cycle Interval: 5 Minutes (300 seconds)")
 
-    # Launch 2-Way Interactive Telegram Mobile Controller
+    # Launch 2-Way Interactive Telegram Mobile Controller silently (no startup popup spam)
     tg_controller = None
     try:
         from core.telegram_controller import TelegramController
         tg_controller = TelegramController(config)
-        tg_controller.start_background_listener(announce_startup=True)
+        tg_controller.start_background_listener(announce_startup=False)
     except Exception as e:
         append_live_log(f"Telegram controller init warning: {e}", level="WARNING")
 

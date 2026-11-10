@@ -161,7 +161,7 @@ class TelegramController:
         except Exception:
             pass
 
-    def start_background_listener(self, announce_startup: bool = True):
+    def start_background_listener(self, announce_startup: bool = False):
         """Starts the 2-way Telegram polling listener in a daemon thread."""
         if not self.enabled or not self.bot_token or not self.chat_id:
             return
@@ -172,21 +172,7 @@ class TelegramController:
         self._prime_offset()
         self._thread = threading.Thread(target=self._poll_loop, daemon=True, name="TelegramControllerThread")
         self._thread.start()
-        append_live_log("📱 2-Way Telegram Mobile Controller ONLINE (Listening for phone commands & button taps).")
-        if announce_startup:
-            self.send_msg(
-                "📱 *2-WAY MOBILE CONTROL CENTER ONLINE*\n"
-                "━━━━━━━━━━━━━━━━━━\n"
-                "Your phone is now linked directly to your live Exness MT5 engine (`#224206742`).\n\n"
-                "Tap any button on your keypad below or use:\n"
-                "• `/status` — Account Balance, Equity & PnL\n"
-                "• `/positions` — 1-Tap Trade Controls (BE, 50%, Close)\n"
-                "• `/scanner` — Live 6-Pair Market Radar\n"
-                "• `/breakeven` — Lock all winning trades to Risk-Free\n"
-                "• `/pause` / `/resume` — Freeze or unfreeze new entries\n"
-                "• `/closeall` — Emergency Panic Close",
-                reply_markup=self.get_main_reply_keyboard()
-            )
+        append_live_log("📱 2-Way Telegram Mobile Controller ONLINE (Listening silently for phone commands & button taps).")
 
     def stop(self):
         self._running = False
