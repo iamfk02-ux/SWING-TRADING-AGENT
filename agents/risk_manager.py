@@ -286,7 +286,7 @@ class RiskManager:
         pending_orders = pending_orders or []
 
         now_utc = datetime.now(timezone.utc)
-        if "timestamp" in signal and signal["timestamp"]:
+        if signal.get("is_backtest") and "timestamp" in signal and signal["timestamp"]:
             try:
                 import pandas as pd
                 ts = pd.to_datetime(signal["timestamp"])
@@ -483,10 +483,17 @@ class RiskManager:
                 cost_per_lot = stop_dist * 100.0
                 raw_lots = risk_amount_usd / max(cost_per_lot, 1.0)
             else:
-                # Standard Forex: pip math converted to account currency
+                # Standard Forex: pip math converted to account currency (USD)
                 pip_size = 0.01 if "JPY" in symbol else 0.0001
                 stop_pips = stop_dist / pip_size
-                pip_val_per_lot = 10.0 if not self.is_cent_account else 0.10
+                s_clean = symbol.replace(".C", "").replace("M", "").replace(".RAW", "")
+                if s_clean.endswith("GBP"):
+                    base_pip_val = 13.50  # GBP quote currency (~$13.50/pip/lot)
+                elif s_clean.endswith("JPY") and entry > 0:
+                    base_pip_val = 1000.0 / entry  # JPY quote currency (~$6.35/pip/lot)
+                else:
+                    base_pip_val = 10.0
+                pip_val_per_lot = base_pip_val if not self.is_cent_account else (base_pip_val * 0.01)
                 cost_per_lot = stop_pips * pip_val_per_lot
                 raw_lots = risk_amount_usd / max(cost_per_lot, 0.01)
 

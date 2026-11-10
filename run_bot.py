@@ -186,22 +186,33 @@ def run_cycle(cycle_num: int = 1) -> int:
                 to_date = datetime.now() + timedelta(days=1)
                 closed_deals = mt5.history_deals_get(from_date, to_date)
                 open_pos_tickets = {p["ticket"] for p in open_positions}
+                pending_order_tickets = {o["ticket"] for o in pending_orders}
                 
-                if closed_deals:
-                    for row in open_db_trades:
-                        db_id, t_ticket, t_sym, t_dir, t_lots, t_entry, t_sl, t_tp, t_strat = row
-                        
-                        # Only finalize if the position is completely closed in MT5 (not still running a partial runner)
-                        if t_ticket in open_pos_tickets:
-                            continue
+                for row in open_db_trades:
+                    db_id, t_ticket, t_sym, t_dir, t_lots, t_entry, t_sl, t_tp, t_strat = row
+                    
+                    # Only finalize if the position is completely closed in MT5 (not still running a partial runner or active pending order)
+                    if t_ticket in open_pos_tickets or t_ticket in pending_order_tickets:
+                        continue
 
-                        # Fetch all exit deals for this position (aggregates partial TP + final exit)
-                        matching_deals = [
-                            d for d in closed_deals 
-                            if d.position_id == t_ticket and d.entry == 1 and getattr(d, "magic", 0) == 10102026
+                    # Fetch all exit deals for this position (aggregates partial TP + final exit)
+                    matching_deals = [
+                        d for d in (closed_deals or [])
+                        if d.position_id == t_ticket and d.entry == 1 and getattr(d, "magic", 0) == 10102026
+                    ]
+
+                    if not matching_deals:
+                        # Pending order was cancelled or expired without ever filling into a position
+                        entry_deals = [
+                            d for d in (closed_deals or [])
+                            if d.position_id == t_ticket and d.entry == 0 and getattr(d, "magic", 0) == 10102026
                         ]
+                        if not entry_deals:
+                            cur.execute("DELETE FROM trades WHERE id = ?", (db_id,))
+                            conn.commit()
+                        continue
 
-                        if matching_deals:
+                    if matching_deals:
                             total_profit_usd = round(sum(d.profit + d.swap + d.commission for d in matching_deals), 2)
                             total_closed_lots = round(sum(d.volume for d in matching_deals), 2)
                             last_deal = max(matching_deals, key=lambda d: d.time)
@@ -507,36 +518,45 @@ def run_cycle(cycle_num: int = 1) -> int:
             })
             continue
 
-        # Collect candidate signals across both H4 and H1 horizons
+        # Collect candidate signals across both H4 and H1 horizons using strictly CLOSED candles (iloc[:-1])
+        # (In MT5, iloc[-1] is the currently forming unclosed bar; evaluating iloc[:-1] prevents mid-candle wick fakeouts!)
         candidate_signals = []
+        df_d1_closed = df_d1.iloc[:-1].reset_index(drop=True) if len(df_d1) > 51 else df_d1
+        df_h4_closed = df_h4.iloc[:-1].reset_index(drop=True) if len(df_h4) > 51 else df_h4
+        df_h1_closed = df_h1.iloc[:-1].reset_index(drop=True) if (df_h1 is not None and len(df_h1) > 51) else df_h1
 
-        # 1. H4 Horizon (Swing Strategy)
-        s_trend_h4 = trend_agent.scan_for_signal(actual_sym, df_d1, df_h4, current_regime)
+        # 1. H4 Horizon (Swing Strategy - Confirmed Closed H4 Candle)
+        s_trend_h4 = trend_agent.scan_for_signal(actual_sym, df_d1_closed, df_h4_closed, current_regime)
         if s_trend_h4:
             s_trend_h4["timeframe"] = "H4"
+            s_trend_h4["market_price"] = curr_price
             candidate_signals.append(s_trend_h4)
 
-        s_mr_h4 = mean_rev_agent.scan_for_signal(actual_sym, df_d1, df_h4, current_regime)
+        s_mr_h4 = mean_rev_agent.scan_for_signal(actual_sym, df_d1_closed, df_h4_closed, current_regime)
         if s_mr_h4:
             s_mr_h4["timeframe"] = "H4"
+            s_mr_h4["market_price"] = curr_price
             candidate_signals.append(s_mr_h4)
 
-        # 2. H1 Horizon (Momentum Strategy)
-        if df_h1 is not None and len(df_h1) >= 50:
-            s_trend_h1 = trend_agent.scan_for_signal(actual_sym, df_d1, df_h1, current_regime)
+        # 2. H1 Horizon (Momentum Strategy - Confirmed Closed H1 Candle)
+        if df_h1_closed is not None and len(df_h1_closed) >= 50:
+            s_trend_h1 = trend_agent.scan_for_signal(actual_sym, df_d1_closed, df_h1_closed, current_regime)
             if s_trend_h1:
                 s_trend_h1["timeframe"] = "H1"
+                s_trend_h1["market_price"] = curr_price
                 candidate_signals.append(s_trend_h1)
 
-            s_mr_h1 = mean_rev_agent.scan_for_signal(actual_sym, df_d1, df_h1, current_regime)
+            s_mr_h1 = mean_rev_agent.scan_for_signal(actual_sym, df_d1_closed, df_h1_closed, current_regime)
             if s_mr_h1:
                 s_mr_h1["timeframe"] = "H1"
+                s_mr_h1["market_price"] = curr_price
                 candidate_signals.append(s_mr_h1)
 
-        # 3. D1 Horizon (Breakout Strategy)
-        s_break = breakout_agent.scan_for_signal(actual_sym, df_d1, current_regime)
+        # 3. D1 Horizon (Breakout Strategy - Confirmed Closed Daily Candle)
+        s_break = breakout_agent.scan_for_signal(actual_sym, df_d1_closed, current_regime)
         if s_break:
             s_break["timeframe"] = "D1"
+            s_break["market_price"] = curr_price
             candidate_signals.append(s_break)
 
         # Multi-Agent Consensus & Dual-Horizon Conflict Arbitration (Architecture Layer 4)
@@ -546,6 +566,31 @@ def run_cycle(cycle_num: int = 1) -> int:
             
             if winning_signal:
                 signal = winning_signal
+                # Verify live price hasn't already invalidated the closed candle's Stop Loss or Take Profit
+                sig_dir = signal.get("direction", "BUY")
+                sig_sl = float(signal.get("stop_loss", 0.0) or 0.0)
+                sig_tp = float(signal.get("take_profit", 0.0) or 0.0)
+                invalid_live_price = (
+                    (sig_dir == "BUY" and ((sig_sl > 0 and curr_price <= sig_sl) or (sig_tp > 0 and curr_price >= sig_tp)))
+                    or (sig_dir == "SELL" and ((sig_sl > 0 and curr_price >= sig_sl) or (sig_tp > 0 and curr_price <= sig_tp)))
+                )
+                # Same-candle deduplication: never place a second order on the exact same closed candle timestamp
+                already_traded_bar = False
+                try:
+                    import sqlite3
+                    with sqlite3.connect(ROOT_DIR / "data" / "trading_journal.db") as conn:
+                        dup_row = conn.execute(
+                            "SELECT id FROM signals WHERE symbol = ? AND strategy = ? AND timestamp = ? AND status = 'APPROVED' LIMIT 1",
+                            (actual_sym, signal.get("strategy", ""), str(signal.get("timestamp", "")))
+                        ).fetchone()
+                        if dup_row:
+                            already_traded_bar = True
+                except Exception:
+                    pass
+
+                if invalid_live_price or already_traded_bar:
+                    continue
+
                 action_badge = "🔥 SETUP FOUND"
                 from core.database import get_symbol_news_modifier
                 news_mod, news_note = get_symbol_news_modifier(actual_sym, signal["direction"])
@@ -638,9 +683,27 @@ def run_cycle(cycle_num: int = 1) -> int:
 
 def main():
     import os
+    import subprocess
     pid_file = ROOT_DIR / "data" / "bot.pid"
     pid_file.parent.mkdir(parents=True, exist_ok=True)
-    pid_file.write_text(str(os.getpid()))
+
+    # Single-Instance Process Guard: Prevent duplicate run_bot.py loops from running simultaneously
+    my_pid = os.getpid()
+    if pid_file.exists():
+        try:
+            old_pid = int(pid_file.read_text().strip())
+            if old_pid != my_pid and old_pid > 0:
+                check = subprocess.run(
+                    ["tasklist", "/FI", f"PID eq {old_pid}", "/NH"],
+                    capture_output=True, text=True, timeout=5
+                )
+                if str(old_pid) in check.stdout and "python" in check.stdout.lower():
+                    print(f"[SINGLE-INSTANCE GUARD] Bot is already running under PID {old_pid}. Exiting duplicate instance ({my_pid}).")
+                    return
+        except Exception:
+            pass
+
+    pid_file.write_text(str(my_pid))
 
     config = load_config()
     timeframe = config.get("data", {}).get("timeframe", "H1").upper()

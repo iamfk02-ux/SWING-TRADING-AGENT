@@ -39,7 +39,8 @@ class DataAgent:
             try:
                 import MetaTrader5 as mt5
                 if not mt5.initialize():
-                    return self._get_fallback_data(symbol, tf)
+                    print(f"[DATA ERROR] MT5 not initialized for {symbol}. Skipping live bar fetch.")
+                    return pd.DataFrame(), pd.DataFrame()
 
                 # Ensure symbol is active in MarketWatch
                 mt5.symbol_select(symbol, True)
@@ -53,7 +54,8 @@ class DataAgent:
                 rates_lower = mt5.copy_rates_from_pos(symbol, mt5_tf, 0, bar_count)
                 
                 if rates_d1 is None or rates_lower is None or len(rates_d1) == 0 or len(rates_lower) == 0:
-                    return self._get_fallback_data(symbol, tf)
+                    print(f"[DATA WARNING] Empty MT5 rates for {symbol} ({tf}). Skipping symbol this cycle.")
+                    return pd.DataFrame(), pd.DataFrame()
 
                 df_d1 = self._rates_to_df(rates_d1)
                 df_lower = self._rates_to_df(rates_lower)
@@ -63,8 +65,8 @@ class DataAgent:
                 df_lower.to_csv(DATA_DIR / f"{symbol}_{tf}.csv", index=False)
                 return df_d1, df_lower
             except Exception as e:
-                print(f"[NOTE] MT5 fetch notice for {symbol} ({tf}): {e}. Falling back to CSV/Synthetic.")
-                return self._get_fallback_data(symbol, tf)
+                print(f"[DATA ERROR] MT5 fetch failed for {symbol} ({tf}): {e}. Skipping symbol (no synthetic fallback in live mode).")
+                return pd.DataFrame(), pd.DataFrame()
 
         return self._get_fallback_data(symbol, tf)
 
