@@ -175,6 +175,8 @@ class RiskManager:
                 if row and row[0]:
                     exit_time_str, exit_reason, pnl_usd = row
                     exit_dt = pd.to_datetime(exit_time_str)
+                    if exit_dt.tzinfo is not None:
+                        exit_dt = exit_dt.tz_convert(None)
                     now_time = pd.to_datetime(datetime.now())
                     hours_elapsed = max(0.0, (now_time - exit_dt).total_seconds() / 3600.0)
 
@@ -279,7 +281,8 @@ class RiskManager:
         Returns: (is_approved, rejection_reason, calculated_lots)
         """
         from datetime import datetime
-        symbol = signal["symbol"].upper()
+        raw_symbol = str(signal["symbol"])
+        symbol = raw_symbol.upper()
         pending_orders = pending_orders or []
 
         now_utc = datetime.now(timezone.utc)
@@ -347,7 +350,7 @@ class RiskManager:
         # 0.2 Spread & Liquidity Filter (Protects against midnight rollover spread widening)
         try:
             import MetaTrader5 as mt5
-            t_info = mt5.symbol_info_tick(symbol)
+            t_info = mt5.symbol_info_tick(raw_symbol) or mt5.symbol_info_tick(symbol)
             if t_info and t_info.ask > 0 and t_info.bid > 0 and stop_dist > 0:
                 live_spread = t_info.ask - t_info.bid
                 max_spread_ratio = self.config.get("risk", {}).get("max_spread_to_stop_ratio", 0.15)
@@ -457,7 +460,8 @@ class RiskManager:
         mt5_connected = False
         try:
             import MetaTrader5 as mt5
-            info = mt5.symbol_info(symbol)
+            mt5_sym = raw_symbol if mt5.symbol_info(raw_symbol) else symbol
+            info = mt5.symbol_info(mt5_sym)
             if info:
                 mt5_connected = True
                 min_lot = info.volume_min if info.volume_min > 0 else 0.01
@@ -465,7 +469,7 @@ class RiskManager:
 
                 # Priority 1: Use MT5 native profit/loss calculation engine (100% broker-certified across all asset classes)
                 mt5_action = mt5.ORDER_TYPE_BUY if direction == "BUY" else mt5.ORDER_TYPE_SELL
-                calc_loss = mt5.order_calc_profit(mt5_action, symbol, 1.0, entry, stop)
+                calc_loss = mt5.order_calc_profit(mt5_action, mt5_sym, 1.0, entry, stop)
                 if calc_loss is not None and abs(calc_loss) > 0:
                     cost_per_lot = abs(calc_loss)
                     raw_lots = risk_amount_usd / cost_per_lot
