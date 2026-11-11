@@ -489,6 +489,10 @@ class RiskManager:
                 s_clean = symbol.replace(".C", "").replace("M", "").replace(".RAW", "")
                 if s_clean.endswith("GBP"):
                     base_pip_val = 13.50  # GBP quote currency (~$13.50/pip/lot)
+                elif s_clean.endswith("CAD"):
+                    base_pip_val = 7.15   # CAD quote currency (~$7.15/pip/lot)
+                elif s_clean.endswith("CHF"):
+                    base_pip_val = 11.50  # CHF quote currency (~$11.50/pip/lot)
                 elif s_clean.endswith("JPY") and entry > 0:
                     base_pip_val = 1000.0 / entry  # JPY quote currency (~$6.35/pip/lot)
                 else:

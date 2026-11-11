@@ -72,6 +72,10 @@ symbols:
     - AUDUSD
     - EURJPY
     - EURGBP
+    - NZDUSD
+    - CADJPY
+    - EURCAD
+    - USDCAD
   # Metals: set to empty list to disable metal trading
   metals: []
 
