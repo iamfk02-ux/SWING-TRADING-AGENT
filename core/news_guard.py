@@ -41,6 +41,10 @@ class NewsGuard:
         "LAGARDE",
         "BAILEY",
         "UEDA",
+        "MACKLEM",
+        "ORR",
+        "OFFICIAL CASH RATE",
+        "EMPLOYMENT CHANGE",
     ]
 
     def __init__(self, config: Optional[Dict[str, Any]] = None):
