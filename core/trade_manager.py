@@ -145,6 +145,7 @@ class TradeManager:
         if ticket_str not in self.state:
             self.state[ticket_str] = {
                 "partial_tp_taken": False,
+                "second_partial_taken": False,
                 "be_applied": False,
                 "step_locked": False,
                 "highest_r": 0.0
@@ -212,8 +213,16 @@ class TradeManager:
                     notifier.notify_breakeven(sym, be_target)
 
         # -------------------------------------------------------------
-        # STEP 2: 33% TRUE PARTIAL TAKE-PROFIT (+1.2R)
+        # STEP 2: 33% TRUE PARTIAL TAKE-PROFIT (+1.2R) + HARD +2.5R RUNNER TP
         # -------------------------------------------------------------
+        runner_tp = round(entry + (2.5 * risk_dist), sym_digits) if direction == "BUY" else round(entry - (2.5 * risk_dist), sym_digits)
+
+        # Ensure any post-partial runner that had TP=0 gets its Hard +2.5R Broker TP restored
+        if self.state[ticket_str].get("partial_tp_taken", False) and (tp is None or tp == 0.0):
+            if exec_agent.modify_sltp(ticket, new_sl=sl, new_tp=runner_tp):
+                tp = runner_tp
+                logger_func(f"🎯 [RUNNER TP ARMED] {sym} #{ticket}: Set Hard +2.5R Broker Take-Profit at {runner_tp:.5f} for spike protection.")
+
         if current_r >= self.partial_tp_trigger_r and not self.state[ticket_str].get("partial_tp_taken", False):
             # Calculate 33% volume rounded to broker lot step
             raw_close_vol = current_vol * self.partial_tp_vol_pct
@@ -229,18 +238,19 @@ class TradeManager:
                     self.state[ticket_str]["partial_time"] = datetime.now(timezone.utc).isoformat()
                     self._save_state()
 
-                    # Ensure SL is at Break-Even (+0.1R cushion) or better, and uncapped TP (0.0) for free runner
+                    # Ensure SL is at Break-Even (+0.1R cushion) or better, and set Hard +2.5R Broker TP for runner
                     be_level = round(entry + (self.be_buffer_r * risk_dist), sym_digits) if direction == "BUY" else round(entry - (self.be_buffer_r * risk_dist), sym_digits)
                     better_sl = (sl > be_level) if direction == "BUY" else (sl < be_level and sl > 0)
                     final_sl = sl if better_sl else be_level
 
-                    exec_agent.modify_sltp(ticket, new_sl=final_sl, new_tp=0.0)
-                    logger_func(f"💰 [PARTIAL TP] {sym} #{ticket}: Banked 33% profit (+${pnl_usd_est:,.2f}) on {close_vol} lots @ +{current_r}R! Remaining {rem_vol} lots running risk-free.")
+                    exec_agent.modify_sltp(ticket, new_sl=final_sl, new_tp=runner_tp)
+                    logger_func(f"💰 [PARTIAL TP] {sym} #{ticket}: Banked 33% profit (+${pnl_usd_est:,.2f}) on {close_vol} lots @ +{current_r}R! Remaining {rem_vol} lots running risk-free (Target TP: {runner_tp:.5f}).")
                     notifier.notify_partial_tp(sym, close_vol, rem_vol, current_price, pnl_usd_est, final_sl)
                     current_vol = rem_vol
                     sl = final_sl
+                    tp = runner_tp
             else:
-                # Standard account 0.01 minimum lot fallback: lock in +0.45R guaranteed profit on the full lot
+                # Standard account 0.01 minimum lot fallback: lock in +0.45R guaranteed profit on the full lot (keep existing +2.0R TP intact)
                 lock_045 = round(entry + (0.45 * risk_dist), sym_digits) if direction == "BUY" else round(entry - (0.45 * risk_dist), sym_digits)
                 needs_045 = (sl < lock_045) if direction == "BUY" else (sl == 0 or sl > lock_045)
                 if needs_045 and exec_agent.modify_stop_loss(ticket, lock_045):
@@ -273,9 +283,30 @@ class TradeManager:
                     logger_func(f"🔒 [STEP-LOCK] {sym} #{ticket} reached +{current_r}R! Guaranteed profit locked at +{self.step_lock_guarantee_r}R (SL: {lock_target:.5f})")
 
         # -------------------------------------------------------------
-        # STEP 4: DYNAMIC MARKET STRUCTURE / CANDLE TRAILING STOP (+1.8R+)
+        # STEP 4: 2ND PARTIAL TP (+1.8R) + DYNAMIC TRAILING STOP (+1.8R+)
         # -------------------------------------------------------------
         if current_r >= self.dynamic_trail_trigger_r:
+            # 4A. If >= 0.02 lots remain, bank a 2nd Partial (0.01 lot) at +1.8R and lock SL at +1.1R
+            if not self.state[ticket_str].get("second_partial_taken", False):
+                close_vol2 = round(round((current_vol * 0.5) / lot_step) * lot_step, 2)
+                rem_vol2 = round(current_vol - close_vol2, 2)
+                if close_vol2 >= min_lot and rem_vol2 >= min_lot:
+                    pnl_usd_est2 = pos.get("profit", 0.0) * (close_vol2 / current_vol)
+                    if exec_agent.close_partial_position(ticket, close_vol2):
+                        self.state[ticket_str]["second_partial_taken"] = True
+                        self._save_state()
+                        lock_11 = round(entry + (1.1 * risk_dist), sym_digits) if direction == "BUY" else round(entry - (1.1 * risk_dist), sym_digits)
+                        better_sl2 = (sl > lock_11) if direction == "BUY" else (sl < lock_11 and sl > 0)
+                        final_sl2 = sl if better_sl2 else lock_11
+                        exec_agent.modify_sltp(ticket, new_sl=final_sl2, new_tp=runner_tp)
+                        logger_func(f"💰 [2ND PARTIAL TP] {sym} #{ticket}: Banked another +${pnl_usd_est2:,.2f} on {close_vol2} lots @ +{current_r}R! Final {rem_vol2} lot locked at +1.1R ({final_sl2:.5f}) targeting {runner_tp:.5f}.")
+                        notifier.notify_partial_tp(sym, close_vol2, rem_vol2, current_price, pnl_usd_est2, final_sl2)
+                        current_vol = rem_vol2
+                        sl = final_sl2
+                else:
+                    self.state[ticket_str]["second_partial_taken"] = True
+                    self._save_state()
+
             trail_candidate = None
 
             if direction == "BUY":
