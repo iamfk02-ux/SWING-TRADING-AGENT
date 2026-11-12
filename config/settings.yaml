@@ -92,8 +92,8 @@ risk:
     tier_b_max_score: 0.74
     tier_b_risk_pct: 0.80          # Score 0.70 - 0.74: conservative 0.80% risk (~$2.75)
     tier_a_max_score: 0.84
-    tier_a_risk_pct: 1.00          # Score 0.75 - 0.84: standard 1.00% risk (~$3.50)
-    tier_aplus_risk_pct: 1.25      # Score >= 0.85: A+ high-conviction 1.25% risk (~$4.30)
+    tier_a_risk_pct: 1.00          # Score 0.75 - 0.84: standard 1.00% risk (~$3.47)
+    tier_aplus_risk_pct: 1.00      # Score >= 0.85: strict 1.00% risk cap (~$3.47)
   max_total_open_risk_pct: 3.5     # Max concurrent open at-risk exposure
   max_currency_exposure_pct: 2.5   # Net at-risk exposure on any single currency (max 2 correlated at-risk trades)
   pending_orders_enabled: true     # Use Limit orders on pullbacks & Stop orders on breakouts

@@ -505,8 +505,8 @@ class RiskManager:
         steps = round(raw_lots / lot_step)
         rounded_lots = round(max(min_lot, steps * lot_step), 2)
 
-        # Safety Check: If rounded lot size would risk more than 1.25x desired risk, step down by 1 step
-        while rounded_lots > min_lot and (rounded_lots * cost_per_lot) > (risk_amount_usd * 1.15):
+        # Safety Check: Never round UP above target 1.0% risk if a smaller lot step is available
+        while rounded_lots > min_lot and (rounded_lots * cost_per_lot) > (risk_amount_usd * 1.02):
             rounded_lots = round(rounded_lots - lot_step, 2)
 
         # Hard Cap: Enforce strict safety limit (cannot exceed 2.0% risk under any broker discrepancy)

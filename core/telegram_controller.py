@@ -8,6 +8,7 @@ Allows the user to monitor and control live MT5 trades and bot state directly fr
 """
 
 import json
+import socket
 import threading
 import time
 import sqlite3
@@ -15,6 +16,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Tuple
 import requests
+import urllib3.util.connection as urllib3_cn
+
+# Force IPv4 for Telegram Bot API to prevent 21-second Windows IPv6 SYN timeouts
+urllib3_cn.allowed_gai_family = lambda: socket.AF_INET
 
 try:
     import MetaTrader5 as mt5

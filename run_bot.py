@@ -10,12 +10,17 @@ Runs the full multi-agent pipeline:
 - Manages trailing stops on active trades
 """
 
+import socket
 import time
 import sys
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 import yaml
+import urllib3.util.connection as urllib3_cn
+
+# Force IPv4 for Telegram Bot API & HTTP requests to prevent 21-second Windows IPv6 SYN timeouts
+urllib3_cn.allowed_gai_family = lambda: socket.AF_INET
 
 ROOT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT_DIR))
@@ -168,6 +173,43 @@ def run_cycle(cycle_num: int = 1) -> int:
     append_live_log(f"Active MT5 Positions: {len(open_positions)} | Pending Orders: {len(pending_orders)}")
 
     notifier = TelegramNotifier(config)
+
+    # 0B. Failsafe Live Position Notification Tracker (Catches filled LIMIT/STOP orders & any missed entry alerts)
+    try:
+        import json
+        notified_pos_file = ROOT_DIR / "data" / "notified_live_positions.json"
+        notified_tickets = set()
+        if notified_pos_file.exists():
+            try:
+                notified_tickets = set(json.loads(notified_pos_file.read_text()))
+            except Exception:
+                notified_tickets = set()
+
+        updated_notified = False
+        for pos in open_positions:
+            p_ticket = int(pos["ticket"])
+            if p_ticket not in notified_tickets:
+                sent_ok = notifier.notify_trade_opened(
+                    symbol=pos["symbol"],
+                    direction=f"{pos['direction']} (LIVE POSITION)",
+                    lots=pos["volume"],
+                    entry=pos["entry_price"],
+                    sl=pos["sl"],
+                    tp=pos["tp"] if pos.get("tp", 0) > 0 else None,
+                    strategy="ACTIVE MT5 POSITION",
+                    score=0.90,
+                    ticket=p_ticket,
+                    order_type="MARKET"
+                )
+                if sent_ok is not False:
+                    notified_tickets.add(p_ticket)
+                    updated_notified = True
+                    append_live_log(f"📱 [TELEGRAM] Sent live position control card for {pos['symbol']} #{p_ticket}.")
+
+        if updated_notified:
+            notified_pos_file.write_text(json.dumps(list(notified_tickets)[-100:]))
+    except Exception as e:
+        append_live_log(f"Live position notification check warning: {e}", level="WARNING")
 
     # 0. Detect newly closed trades from MT5 deal history and dispatch post-trade analysis
     try:
@@ -632,7 +674,7 @@ def run_cycle(cycle_num: int = 1) -> int:
                             if ticket:
                                 circuit_breaker.record_execution_success()
                                 append_live_log(f"🎉 [{actual_sym}] Live {order_type_str} ({tf_label}) Order Placed in MT5! Ticket #{ticket} (Auto-exp: {expiry_h}h)")
-                                notifier.notify_trade_opened(
+                                sent_alert = notifier.notify_trade_opened(
                                     symbol=actual_sym,
                                     direction=f"{signal['direction']} ({order_type_str} - {tf_label})",
                                     lots=lots,
@@ -644,6 +686,15 @@ def run_cycle(cycle_num: int = 1) -> int:
                                     ticket=ticket,
                                     order_type=order_type_str
                                 )
+                                if sent_alert and order_type_str.upper() == "MARKET":
+                                    try:
+                                        import json
+                                        nf_file = ROOT_DIR / "data" / "notified_live_positions.json"
+                                        nf_set = set(json.loads(nf_file.read_text())) if nf_file.exists() else set()
+                                        nf_set.add(int(ticket))
+                                        nf_file.write_text(json.dumps(list(nf_set)[-100:]))
+                                    except Exception:
+                                        pass
                             else:
                                 tripped = circuit_breaker.record_execution_error("Order placement rejected by MT5 terminal.")
                                 if tripped:

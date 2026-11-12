@@ -7,10 +7,15 @@ Sends alerts directly to your phone via Telegram Bot:
 - Risk alarms & Kill Switch warnings
 """
 
+import socket
 import requests
+import urllib3.util.connection as urllib3_cn
 from typing import Dict, Any, Optional
 from pathlib import Path
 from core.config_loader import load_config
+
+# Force IPv4 for Telegram Bot API to prevent 21-second Windows IPv6 SYN timeouts
+urllib3_cn.allowed_gai_family = lambda: socket.AF_INET
 
 
 class TelegramNotifier:
@@ -26,20 +31,42 @@ class TelegramNotifier:
     def send_message(self, text: str, reply_markup: Optional[Dict[str, Any]] = None) -> bool:
         if not self.enabled or not self.bot_token or not self.chat_id:
             return False
+        import time
+        url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"
+        payload: Dict[str, Any] = {
+            "chat_id": self.chat_id,
+            "text": text,
+            "parse_mode": "Markdown"
+        }
+        if reply_markup is not None:
+            payload["reply_markup"] = reply_markup
+
+        last_err = None
+        for attempt in range(1, 4):
+            try:
+                res = requests.post(url, json=payload, timeout=10)
+                if res.status_code == 200:
+                    return True
+                # If Markdown parsing failed on special chars, retry without parse_mode
+                if res.status_code == 400 and "parse_mode" in payload:
+                    payload_plain = dict(payload)
+                    payload_plain.pop("parse_mode", None)
+                    res2 = requests.post(url, json=payload_plain, timeout=10)
+                    if res2.status_code == 200:
+                        return True
+                last_err = f"HTTP {res.status_code}: {res.text[:120]}"
+            except Exception as e:
+                last_err = str(e)
+            if attempt < 3:
+                time.sleep(1.5 * attempt)
+
         try:
-            url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"
-            payload: Dict[str, Any] = {
-                "chat_id": self.chat_id,
-                "text": text,
-                "parse_mode": "Markdown"
-            }
-            if reply_markup is not None:
-                payload["reply_markup"] = reply_markup
-            res = requests.post(url, json=payload, timeout=20)
-            return res.status_code == 200
-        except Exception as e:
-            print(f"[TELEGRAM ERROR] Could not dispatch alert: {e}")
-            return False
+            from core.bot_logger import append_live_log
+            append_live_log(f"⚠️ [TELEGRAM] Failed to deliver alert after 3 attempts: {last_err}", level="WARNING")
+        except Exception:
+            pass
+        print(f"[TELEGRAM ERROR] Could not dispatch alert after 3 attempts: {last_err}")
+        return False
 
     def notify_trade_opened(
         self,
@@ -91,7 +118,7 @@ class TelegramNotifier:
                         ]
                     ]
                 }
-        self.send_message(msg, reply_markup=markup)
+        return self.send_message(msg, reply_markup=markup)
 
     def notify_breakeven(self, symbol: str, new_sl: float):
         msg = (
