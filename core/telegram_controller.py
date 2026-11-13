@@ -84,7 +84,8 @@ class TelegramController:
         return {
             "keyboard": [
                 [{"text": "📊 Status"}, {"text": "💼 Positions"}, {"text": "🔍 Scanner"}],
-                [{"text": "🛡️ All Break-Even"}, {"text": pause_btn}, {"text": "🚨 Panic Close"}]
+                [{"text": "🌐 Macro Desk"}, {"text": "🛡️ All Break-Even"}, {"text": pause_btn}],
+                [{"text": "🚨 Panic Close"}]
             ],
             "resize_keyboard": True,
             "is_persistent": True
@@ -138,7 +139,8 @@ class TelegramController:
         commands = [
             {"command": "status", "description": "📊 Live balance, equity, PnL & bot state"},
             {"command": "positions", "description": "💼 Manage open trades & pending orders"},
-            {"command": "scanner", "description": "🔍 Live 6-pair regime & pullback radar"},
+            {"command": "scanner", "description": "🔍 Live 10-pair regime & pullback radar"},
+            {"command": "macro", "description": "🌐 Central Bank rates, macro strength & pair biases"},
             {"command": "breakeven", "description": "🛡️ Move all profitable trades to Break-Even"},
             {"command": "pause", "description": "⏸️ Pause opening new trades"},
             {"command": "resume", "description": "▶️ Resume opening new trades"},
@@ -232,6 +234,8 @@ class TelegramController:
             self._cmd_positions()
         elif low.startswith("/scanner") or "scanner" in low:
             self._cmd_scanner()
+        elif low.startswith("/macro") or "macro" in low or "fundamental" in low:
+            self._cmd_macro()
         elif low.startswith("/breakeven") or "break-even" in low:
             self._cmd_breakeven_all()
         elif low.startswith("/pause") or "pause entries" in low:
@@ -256,6 +260,9 @@ class TelegramController:
         elif data == "cmd:scanner":
             self.answer_callback(cb_id, "Loading live scanner...")
             self._cmd_scanner()
+        elif data == "cmd:macro":
+            self.answer_callback(cb_id, "Loading Macro Desk...")
+            self._cmd_macro()
         elif data == "cmd:be_all":
             self.answer_callback(cb_id, "Moving winning trades to Break-Even...")
             self._cmd_breakeven_all()
@@ -491,8 +498,9 @@ class TelegramController:
             self.send_msg("🔍 Scanner matrix is warming up. Try again in a few seconds.")
             return
 
+        total_p = len(matrix.get('pairs', []))
         lines = [
-            "🔍 *LIVE 6-PAIR MARKET SCANNER*",
+            f"🔍 *LIVE {total_p}-PAIR MARKET SCANNER*",
             f"🕒 Updated: `{matrix.get('timestamp', 'Just now')}`",
             "━━━━━━━━━━━━━━━━━━"
         ]
@@ -508,11 +516,31 @@ class TelegramController:
             "inline_keyboard": [
                 [
                     {"text": "🔄 Refresh Scanner", "callback_data": "cmd:scanner"},
+                    {"text": "🌐 Macro Desk", "callback_data": "cmd:macro"},
                     {"text": "📊 Account Status", "callback_data": "cmd:status"}
                 ]
             ]
         }
         self.send_msg("\n".join(lines), reply_markup=inline)
+
+    def _cmd_macro(self):
+        try:
+            from core.macro_engine import MacroEngine
+            macro_engine = MacroEngine(self.config)
+            forex_syms = self.config.get("symbols", {}).get("forex", [])
+            msg = macro_engine.format_telegram_macro_summary(forex_syms)
+            inline = {
+                "inline_keyboard": [
+                    [
+                        {"text": "🔄 Refresh Macro", "callback_data": "cmd:macro"},
+                        {"text": "🔍 Scanner", "callback_data": "cmd:scanner"},
+                        {"text": "📊 Status", "callback_data": "cmd:status"}
+                    ]
+                ]
+            }
+            self.send_msg(msg, reply_markup=inline)
+        except Exception as e:
+            self.send_msg(f"⚠️ Error loading Macro Desk: {e}", reply_markup=self.get_main_reply_keyboard())
 
     def _action_breakeven_single(self, cb_id: str, ticket: int):
         exec_agent = ExecutionAgent(self.config)

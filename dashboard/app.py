@@ -702,7 +702,41 @@ with tab_news:
     from core.news_feed import get_latest_financial_news
     from core.database import delete_news_bias, clear_all_news_biases
 
-    WATCHLIST_CURRENCIES = ["USD", "EUR", "GBP", "JPY", "AUD"]
+    WATCHLIST_CURRENCIES = ["USD", "EUR", "GBP", "JPY", "AUD", "CAD", "NZD", "CHF"]
+
+    from core.macro_engine import MacroEngine
+    macro_eng = MacroEngine()
+    forex_list = config.get("symbols", {}).get("forex", [])
+
+    with st.expander("🌐 Central Bank Policy Matrix & Watchlist Directional Biases", expanded=True):
+        st.markdown("**Core Philosophy:** *Fundamentals drive the direction (The Tide); Technicals determine entry & risk (The Wave).*")
+        m_col1, m_col2 = st.columns([1.05, 1.35], gap="medium")
+        with m_col1:
+            st.markdown("##### 🏛️ Central Bank Benchmarks")
+            cb_rows = []
+            for c in ["USD", "EUR", "GBP", "JPY", "CAD", "AUD", "NZD", "CHF"]:
+                p = macro_eng.profiles[c]
+                score = macro_eng.get_currency_macro_score(c)
+                cb_rows.append({
+                    "Currency": c,
+                    "Policy Rate": f"{p['policy_rate']:.2f}%",
+                    "Cycle Stance": p['policy_stance'].replace('_', ' ').title(),
+                    "Score": f"{score:+.1f}"
+                })
+            st.dataframe(pd.DataFrame(cb_rows), use_container_width=True, hide_index=True)
+
+        with m_col2:
+            st.markdown("##### 🧭 10-Pair Macro Directional Biases")
+            pair_rows = []
+            for s in forex_list:
+                eval_p = macro_eng.evaluate_pair_macro(s)
+                pair_rows.append({
+                    "Symbol": s,
+                    "Macro Bias": eval_p['bias_badge'],
+                    "Carry Diff": f"{eval_p['rate_differential']:+.2f}%",
+                    "Action": eval_p['preferred_direction']
+                })
+            st.dataframe(pd.DataFrame(pair_rows), use_container_width=True, hide_index=True)
 
     col_bias, col_calendar = st.columns([1.05, 1.25], gap="large")
 

@@ -17,7 +17,7 @@ from typing import List, Dict, Any
 from datetime import datetime, timezone
 
 BREAKING_CACHE_FILE = Path(__file__).resolve().parent.parent / "data" / "breaking_news_cache.json"
-WATCHLIST_CURRENCIES = ["USD", "EUR", "GBP", "JPY", "AUD"]
+WATCHLIST_CURRENCIES = ["USD", "EUR", "GBP", "JPY", "AUD", "CAD", "NZD", "CHF"]
 
 CURRENCY_KEYWORDS = {
     "USD": ["fed", "federal reserve", "dollar", "powell", "usd", "treasury", "fomc", "united states", "u.s.", "nfp", "wall street"],
@@ -109,6 +109,18 @@ def get_latest_financial_news(limit: int = 12, force_refresh: bool = False, watc
                         "verdict": ai_eval["verdict"],
                         "advice": ai_eval["advice"]
                     })
+
+                    # If headline carries strong decisive directional sentiment, register into MacroEngine
+                    if ai_eval["bias"] != 0 and primary_curr in WATCHLIST_CURRENCIES:
+                        try:
+                            from core.macro_engine import MacroEngine
+                            MacroEngine().update_news_sentiment(
+                                currency=primary_curr,
+                                headline=title.strip(),
+                                score_delta=float(ai_eval["bias"]) * 0.25
+                            )
+                        except Exception:
+                            pass
 
                 if raw_items:
                     BREAKING_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)

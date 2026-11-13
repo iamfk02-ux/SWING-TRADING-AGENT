@@ -37,6 +37,16 @@ news:
   cancel_pending_before_news: true # Automatically cancel pending orders on affected currency to avoid slippage
 
 # ---------------------------------------------------------------------
+# INSTITUTIONAL MACRO & FUNDAMENTAL ENGINE
+# "Fundamentals drive the direction (The Tide); Technicals time the entry (The Wave)."
+# ---------------------------------------------------------------------
+macro:
+  enabled: true                    # Enforces Central Bank divergence and interest rate carry rules
+  block_counter_macro: true       # Hard-block entries that fight against Strong Bearish / Strong Bullish tides
+  confluence_boost_pct: 25.0       # Score multiplier boost (+25%) when Technicals align with Macro Tide
+  counter_macro_penalty_pct: 35.0  # Score penalty (-35%) on mild counter-fundamental setups
+
+# ---------------------------------------------------------------------
 # MT5 CONNECTION
 # Leave login/password/server empty if MT5 is already open and logged in.
 # ---------------------------------------------------------------------

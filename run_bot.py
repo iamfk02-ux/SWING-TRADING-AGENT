@@ -122,8 +122,10 @@ def run_cycle(cycle_num: int = 1) -> int:
 
     from agents.consensus_engine import ConsensusEngine
     from core.circuit_breaker import CircuitBreaker
+    from core.macro_engine import MacroEngine
     consensus_engine = ConsensusEngine(config)
     circuit_breaker = CircuitBreaker(config)
+    macro_engine = MacroEngine(config)
 
     # Weekend vs Weekday portfolio selection
     is_weekend = datetime.now(timezone.utc).weekday() in (5, 6)
@@ -634,11 +636,30 @@ def run_cycle(cycle_num: int = 1) -> int:
                     continue
 
                 action_badge = "🔥 SETUP FOUND"
+                # 1. Institutional Macro Gatekeeper & Confluence Filter
+                is_macro_approved, macro_mult, macro_reason, macro_data = macro_engine.filter_and_score_signal(
+                    symbol=actual_sym,
+                    technical_direction=signal["direction"],
+                    technical_score=signal.get("confidence", 0.6)
+                )
+
+                if not is_macro_approved:
+                    action_badge = "🚫 COUNTER-MACRO"
+                    append_live_log(f"🚫 [{actual_sym}] SETUP REJECTED BY MACRO: {macro_reason}")
+                    signal["status"] = "REJECTED_BY_MACRO"
+                    signal["rejection_reason"] = macro_reason
+                    log_signal(signal)
+                    continue
+
+                signal["macro_bias"] = macro_data.get("bias", "NEUTRAL")
+                signal["macro_narrative"] = macro_data.get("narrative", "")
+
                 from core.database import get_symbol_news_modifier
                 news_mod, news_note = get_symbol_news_modifier(actual_sym, signal["direction"])
-                score = scorer.score_signal(signal, news_modifier=news_mod)
+                combined_macro_mod = round(max(0.40, min(1.60, macro_mult * news_mod)), 2)
+                score = scorer.score_signal(signal, news_modifier=combined_macro_mod)
                 tf_label = signal.get("timeframe", "H4")
-                append_live_log(f"⚡ [{actual_sym}] SETUP DETECTED! Strategy: {signal['strategy']} on {tf_label} {signal['direction']} | Final Score: {score:.2f} (News Modifier: {news_mod:.2f} - {news_note})")
+                append_live_log(f"⚡ [{actual_sym}] SETUP DETECTED! Strategy: {signal['strategy']} on {tf_label} {signal['direction']} | Final Score: {score:.2f} (Macro: {signal['macro_bias']} {macro_mult:.2f}x - {macro_reason})")
 
                 if scorer.is_eligible(score):
                     from core.telegram_controller import is_entries_paused
@@ -684,7 +705,9 @@ def run_cycle(cycle_num: int = 1) -> int:
                                     strategy=f"{signal['strategy']} [{tf_label}]",
                                     score=score,
                                     ticket=ticket,
-                                    order_type=order_type_str
+                                    order_type=order_type_str,
+                                    macro_bias=signal.get("macro_bias"),
+                                    macro_narrative=signal.get("macro_narrative")
                                 )
                                 if sent_alert and order_type_str.upper() == "MARKET":
                                     try:
@@ -703,10 +726,13 @@ def run_cycle(cycle_num: int = 1) -> int:
                             action_badge = "⚠️ RISK REJECTED"
                             append_live_log(f"⚠️ [{actual_sym}] Trade Rejected by Risk Manager: {reason}")
 
+        pair_macro = macro_engine.evaluate_pair_macro(actual_sym)
         scanner_matrix_rows.append({
             "symbol": actual_sym,
             "price": curr_price,
             "regime": current_regime,
+            "macro_bias": pair_macro.get("bias", "NEUTRAL"),
+            "macro_diff": pair_macro.get("rate_differential", 0.0),
             "badge": action_badge,
             "details": status_text,
             "last_checked": datetime.now().strftime("%H:%M:%S")

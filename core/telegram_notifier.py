@@ -79,10 +79,18 @@ class TelegramNotifier:
         strategy: str,
         score: float,
         ticket: Optional[int] = None,
-        order_type: str = "MARKET"
+        order_type: str = "MARKET",
+        macro_bias: Optional[str] = None,
+        macro_narrative: Optional[str] = None
     ):
         title = "🚀 *TRADE OPENED*" if order_type.upper() == "MARKET" else f"⏳ *{order_type.upper()} ORDER PLACED*"
         ticket_line = f"🎫 *Ticket:* `#{ticket}`\n" if ticket else ""
+        macro_section = ""
+        if macro_bias:
+            macro_section = f"🌐 *Macro Tide:* `{macro_bias}`\n"
+            if macro_narrative:
+                macro_section += f"💡 *Fundamental Driver:* _{macro_narrative}_\n"
+
         msg = (
             f"{title}\n"
             f"━━━━━━━━━━━━━━━━━━\n"
@@ -90,6 +98,7 @@ class TelegramNotifier:
             f"📈 *Symbol:* `{symbol}`\n"
             f"🎯 *Strategy:* `{strategy}`\n"
             f"🔄 *Direction:* *{direction}*\n"
+            f"{macro_section}"
             f"📦 *Volume:* `{lots:.2f} lots`\n"
             f"💰 *Entry:* `{entry:.5f}`\n"
             f"🛑 *Stop Loss:* `{sl:.5f}`\n"
