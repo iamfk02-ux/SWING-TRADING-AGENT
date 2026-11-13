@@ -77,6 +77,23 @@ class DataAgent:
         df.rename(columns={"tick_volume": "volume"}, inplace=True)
         return df
 
+    def get_m15_bars(self, symbol: str, count: int = 150) -> pd.DataFrame:
+        """
+        Fetches M15 (15-minute) bars for Post-News Momentum analysis.
+        """
+        if self.source == "mt5":
+            try:
+                import MetaTrader5 as mt5
+                if not mt5.initialize():
+                    return pd.DataFrame()
+                mt5.symbol_select(symbol, True)
+                rates_m15 = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M15, 0, count)
+                if rates_m15 is not None and len(rates_m15) > 0:
+                    return self._rates_to_df(rates_m15)
+            except Exception as e:
+                print(f"[DATA ERROR] MT5 M15 fetch failed for {symbol}: {e}")
+        return pd.DataFrame()
+
     def _get_fallback_data(self, symbol: str, tf: str = "H1") -> Tuple[pd.DataFrame, pd.DataFrame]:
         d1_csv = DATA_DIR / f"{symbol}_D1.csv"
         lower_csv = DATA_DIR / f"{symbol}_{tf}.csv"

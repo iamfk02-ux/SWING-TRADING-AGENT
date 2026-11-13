@@ -229,6 +229,14 @@ strategies:
     rsi_oversold: 35
     rsi_overbought: 65
     stop_buffer_atr: 0.75
+  post_news_momentum:
+    enabled: true
+    min_minutes_after: 15          # Dust must settle: zero entries within 0-15m whipsaw/spread spike
+    max_minutes_after: 120         # Momentum repricing window: active within 2 hours of release
+    min_impulse_atr_multiplier: 0.75 # News M15 candle must show real institutional impulse (>= 0.75x ATR)
+    target_r: 2.0                  # Enforce minimum 2.0R reward-to-risk on momentum impulse
+    stop_buffer_atr: 0.5           # Buffer behind news reaction base
+    min_stop_pips: 20.0            # Anti-whipsaw 20-pip safety floor (never use fragile 8-10 pip stops)
 
 # ---------------------------------------------------------------------
 # BACKTEST PASS / FAIL CRITERIA (strategy_spec.md section 10)

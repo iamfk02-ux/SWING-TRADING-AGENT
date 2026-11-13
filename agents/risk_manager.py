@@ -389,7 +389,13 @@ class RiskManager:
         if self.news_guard:
             is_blocked_news, news_reason = self.news_guard.check_symbol_news(symbol)
             if is_blocked_news:
-                return False, f"NEWS SHIELD: {news_reason}", 0.0
+                strat = signal.get("strategy", "")
+                mins_ago = signal.get("minutes_ago", 0)
+                # Post-News Momentum Hunter is specifically authorized to trade between 15m and 120m post-release
+                if strat == "POST_NEWS_MOMENTUM" and "released" in str(news_reason) and (15 <= mins_ago <= 120):
+                    pass  # Authorized post-news repricing wave (dust has settled)
+                else:
+                    return False, f"NEWS SHIELD: {news_reason}", 0.0
 
         # 1. Persistent High-Water Mark (peak_equity) & Kill Switch Check
         true_peak = self._get_and_update_peak_equity(account_equity, peak_equity)

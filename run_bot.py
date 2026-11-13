@@ -30,6 +30,7 @@ from agents.regime_agent import MarketRegimeAgent
 from agents.trend_agent import TrendAgent
 from agents.breakout_agent import BreakoutAgent
 from agents.mean_reversion_agent import MeanReversionAgent
+from agents.post_news_agent import PostNewsMomentumAgent
 from agents.signal_scorer import SignalScorer
 from agents.risk_manager import RiskManager
 from agents.execution_agent import ExecutionAgent
@@ -115,6 +116,7 @@ def run_cycle(cycle_num: int = 1) -> int:
     trend_agent = TrendAgent(config)
     breakout_agent = BreakoutAgent(config)
     mean_rev_agent = MeanReversionAgent(config)
+    post_news_agent = PostNewsMomentumAgent(config)
     scorer = SignalScorer(config)
     risk_manager = RiskManager(config)
     if equity > 0:
@@ -604,6 +606,28 @@ def run_cycle(cycle_num: int = 1) -> int:
             s_break["timeframe"] = "D1"
             s_break["market_price"] = curr_price
             candidate_signals.append(s_break)
+
+        # 4. M15 Horizon (Post-News Momentum Hunter - 15m to 120m Post High-Impact Release)
+        if risk_manager.news_guard:
+            recent_high_impact = risk_manager.news_guard.get_recent_high_impact_events(min_minutes_ago=15, max_minutes_ago=120)
+            if recent_high_impact:
+                sym_clean = actual_sym.upper().replace(".C", "").replace("M", "").replace(".RAW", "")
+                for ev in recent_high_impact:
+                    ev_curr = ev.get("country", "")
+                    if ev_curr and (sym_clean.startswith(ev_curr) or sym_clean.endswith(ev_curr) or (ev_curr == "USD" and "XAU" in sym_clean)):
+                        df_m15 = data_agent.get_m15_bars(actual_sym, count=60)
+                        if df_m15 is not None and len(df_m15) >= 30:
+                            pair_m = macro_engine.evaluate_pair_macro(actual_sym)
+                            s_pnm = post_news_agent.scan_for_signal(
+                                symbol=actual_sym,
+                                df_m15=df_m15,
+                                event=ev,
+                                macro_bias=pair_m.get("directional_bias")
+                            )
+                            if s_pnm:
+                                candidate_signals.append(s_pnm)
+                                append_live_log(f"⚡ [{actual_sym}] Post-News Momentum Signal: {s_pnm['direction']} ({ev_curr} '{ev['title']}', {ev['minutes_ago']}m ago)")
+                        break
 
         # Multi-Agent Consensus & Dual-Horizon Conflict Arbitration (Architecture Layer 4)
         if candidate_signals:

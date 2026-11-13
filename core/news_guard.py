@@ -242,6 +242,56 @@ class NewsGuard:
 
         return upcoming
 
+    def get_recent_high_impact_events(self, min_minutes_ago: int = 15, max_minutes_ago: int = 120) -> List[Dict[str, Any]]:
+        """
+        Returns all High-Impact events that were released between `min_minutes_ago` and `max_minutes_ago`.
+        This defines the prime Post-News Momentum Hunter window (after the 1-15m whipsaw/spread spike has cleared).
+        """
+        if not self.enabled or not self.events:
+            return []
+
+        now = datetime.now(timezone.utc)
+        recent = []
+
+        for ev in self.events:
+            if ev.get("impact") != "High":
+                continue
+
+            date_str = ev.get("date", "")
+            if not date_str:
+                continue
+
+            try:
+                ev_time = datetime.fromisoformat(date_str)
+                ev_time_utc = ev_time.astimezone(timezone.utc)
+            except Exception:
+                continue
+
+            time_diff_mins = (ev_time_utc - now).total_seconds() / 60.0
+
+            # Event occurred in the past (time_diff_mins < 0)
+            if time_diff_mins < 0:
+                mins_ago = int(abs(time_diff_mins))
+                if min_minutes_ago <= mins_ago <= max_minutes_ago:
+                    title = str(ev.get("title", ""))
+                    country = str(ev.get("country", "")).upper()
+                    event_id = f"{country}_{title}_{date_str}"
+                    recent.append({
+                        "id": event_id,
+                        "title": title,
+                        "country": country,
+                        "date": date_str,
+                        "release_time_utc": ev_time_utc,
+                        "minutes_ago": mins_ago,
+                        "forecast": ev.get("forecast", "-"),
+                        "previous": ev.get("previous", "-"),
+                        "is_tier1": self.is_tier1_event(title)
+                    })
+
+        # Sort by most recent first
+        recent.sort(key=lambda x: x["minutes_ago"])
+        return recent
+
     def is_event_alerted(self, event_id: str) -> bool:
         return event_id in self.alerted_events
 
