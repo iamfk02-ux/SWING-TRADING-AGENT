@@ -250,14 +250,14 @@ class TradeManager:
                     sl = final_sl
                     tp = runner_tp
             else:
-                # Standard account 0.01 minimum lot fallback: lock in +0.45R guaranteed profit on the full lot (keep existing +2.0R TP intact)
-                lock_045 = round(entry + (0.45 * risk_dist), sym_digits) if direction == "BUY" else round(entry - (0.45 * risk_dist), sym_digits)
-                needs_045 = (sl < lock_045) if direction == "BUY" else (sl == 0 or sl > lock_045)
-                if needs_045 and exec_agent.modify_stop_loss(ticket, lock_045):
-                    sl = lock_045
+                # Standard account 0.01 minimum lot fallback: lock in +0.25R guaranteed profit on the full lot (leaving 1.25R+ breathing room to target)
+                lock_025 = round(entry + (0.25 * risk_dist), sym_digits) if direction == "BUY" else round(entry - (0.25 * risk_dist), sym_digits)
+                needs_025 = (sl < lock_025) if direction == "BUY" else (sl == 0 or sl > lock_025)
+                if needs_025 and exec_agent.modify_stop_loss(ticket, lock_025):
+                    sl = lock_025
                     self.state[ticket_str]["partial_tp_taken"] = True
                     self._save_state()
-                    logger_func(f"🔒 [MIN-LOT PROFIT LOCK] {sym} #{ticket} ({current_vol} lot) reached +{current_r}R! Stop Loss locked at +0.45R ({lock_045:.5f}).")
+                    logger_func(f"🔒 [MIN-LOT PROFIT LOCK] {sym} #{ticket} ({current_vol} lot) reached +{current_r}R! Stop Loss secured at +0.25R ({lock_025:.5f}) with ample room to breathe to +2.5R target.")
 
         # -------------------------------------------------------------
         # STEP 3: STEP-LOCK GUARANTEED PROFIT (+1.5R -> Lock +0.6R)

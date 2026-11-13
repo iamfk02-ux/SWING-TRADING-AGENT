@@ -93,19 +93,19 @@ symbols:
 # RISK MANAGER  (hard rules - the optimizer can never change these)
 # ---------------------------------------------------------------------
 risk:
-  risk_per_trade_pct: 1.0          # Base % of equity risked per trade (~$3.47 on $347 balance)
-  max_risk_per_trade_pct: 1.6      # Hard cap ceiling (prevents any trade from ever exceeding ~1.5% risk)
+  risk_per_trade_pct: 2.0          # Base % of equity risked per trade (~$7.03 on $351 balance)
+  max_risk_per_trade_pct: 2.8      # Hard cap ceiling (allows rounding up to 0.02 lots on tight stops)
   max_open_positions: 3            # Maximum concurrent AT-RISK positions
   free_roll_slot_recycling: true   # Risk-Free trades (SL at/above Break-Even) become Free Runners & free up slots
   conviction_sizing:
     enabled: true
     tier_b_max_score: 0.74
-    tier_b_risk_pct: 0.80          # Score 0.70 - 0.74: conservative 0.80% risk (~$2.75)
+    tier_b_risk_pct: 1.50          # Score 0.70 - 0.74: conservative 1.50% risk (~$5.25)
     tier_a_max_score: 0.84
-    tier_a_risk_pct: 1.00          # Score 0.75 - 0.84: standard 1.00% risk (~$3.47)
-    tier_aplus_risk_pct: 1.00      # Score >= 0.85: strict 1.00% risk cap (~$3.47)
-  max_total_open_risk_pct: 3.5     # Max concurrent open at-risk exposure
-  max_currency_exposure_pct: 2.5   # Net at-risk exposure on any single currency (max 2 correlated at-risk trades)
+    tier_a_risk_pct: 2.00          # Score 0.75 - 0.84: standard 2.00% risk (~$7.03)
+    tier_aplus_risk_pct: 2.00      # Score >= 0.85: strict 2.00% risk cap (~$7.03)
+  max_total_open_risk_pct: 6.0     # Max concurrent open at-risk exposure (3 trades * 2.0%)
+  max_currency_exposure_pct: 4.5   # Net at-risk exposure on any single currency (max 2 correlated at-risk trades)
   pending_orders_enabled: true     # Use Limit orders on pullbacks & Stop orders on breakouts
   pending_order_expiry_hours: 4    # Auto-cancel pending orders if unfilled after 4 hours (prevents overnight lingering)
   cancel_pending_outside_session: true # Auto-cancel unfilled pending orders at session close (18:00 UTC) & Friday cutoff
@@ -152,18 +152,18 @@ risk:
   friday_cutoff_server_hour: 18
 
 # ---------------------------------------------------------------------
-# TRADE MANAGEMENT & PROFIT LOCKING (Balanced Model)
+# TRADE MANAGEMENT & PROFIT LOCKING (Balanced Model - Runners Given Room to Breathe)
 # ---------------------------------------------------------------------
 trade_management:
   enabled: true
-  breakeven_trigger_r: 0.8         # Move SL to Break-Even at +0.8R
-  breakeven_buffer_r: 0.1          # Cushion above entry (0.1R) to cover commission/spread
-  partial_tp_trigger_r: 1.2        # Bank partial profit at +1.2R
-  partial_tp_volume_pct: 0.33      # Bank 33% of position into cash
-  step_lock_trigger_r: 1.5         # Step-lock guaranteed profit at +1.5R
-  step_lock_guarantee_r: 0.6       # Guaranteed locked profit (+0.6R)
-  dynamic_trail_trigger_r: 1.8     # Trail SL once trade reaches +1.8R
-  trail_atr_multiplier: 1.2        # Distance behind price: 1.2 * lower_atr
+  breakeven_trigger_r: 1.0         # Move SL to Break-Even at +1.0R (let trade develop before locking BE)
+  breakeven_buffer_r: 0.05         # Cushion above entry (0.05R) to cover commission/spread
+  partial_tp_trigger_r: 1.5        # Bank partial profit at +1.5R (let initial leg expand into profit)
+  partial_tp_volume_pct: 0.50      # Bank 50% of position into cash (e.g. 0.01 lot of 0.02 lots)
+  step_lock_trigger_r: 2.0         # Step-lock guaranteed profit at +2.0R
+  step_lock_guarantee_r: 0.8       # Guaranteed locked profit (+0.8R)
+  dynamic_trail_trigger_r: 2.2     # Trail SL once trade reaches +2.2R
+  trail_atr_multiplier: 1.5        # Distance behind price: 1.5 * lower_atr (ample breathing room)
   trail_to_candle_structure: true  # Trail behind previous candle High/Low
 
 # ---------------------------------------------------------------------
@@ -208,7 +208,7 @@ strategies:
     min_stop_atr: 1.2              # Upgraded from 1.0: Minimum 1.2 ATR stop distance
     min_stop_pips: 20.0            # Mandatory 20-pip minimum stop floor to prevent whipsaws
     max_stop_atr: 3.0
-    target_r: 2.0                  # Upgraded from 1.5: Enforce minimum 2.0R reward-to-risk
+    target_r: 2.5                  # Upgraded to 2.5R to let runners capture full multi-day swing expansions
     breakeven_at_r: 1.0            # Move to BE at +1.0R to lock in risk-free trade early
     breakeven_buffer_r: 0.05
     trail_atr_d1: 2.5
