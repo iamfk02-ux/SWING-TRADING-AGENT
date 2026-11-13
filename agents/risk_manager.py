@@ -200,6 +200,30 @@ class RiskManager:
             return [s[:3], s[3:6]]
         return [s]
 
+    def _get_directional_currency_exposures(self, symbol: str, direction: str) -> Dict[str, str]:
+        """
+        Decomposes a trade into individual currency directional exposures.
+        E.g.
+        EURUSD BUY  -> {'EUR': 'LONG', 'USD': 'SHORT'}
+        EURUSD SELL -> {'EUR': 'SHORT', 'USD': 'LONG'}
+        USDCAD BUY  -> {'USD': 'LONG', 'CAD': 'SHORT'}
+        EURCAD SELL -> {'EUR': 'SHORT', 'CAD': 'LONG'}
+        """
+        s = symbol.upper().replace(".C", "").replace("M", "").replace(".RAW", "")
+        dir_clean = str(direction).upper()
+        if "XAU" in s or "GOLD" in s:
+            return {
+                "XAU": "LONG" if "BUY" in dir_clean else "SHORT",
+                "USD": "SHORT" if "BUY" in dir_clean else "LONG"
+            }
+        if len(s) >= 6:
+            base, quote = s[:3], s[3:6]
+            if "BUY" in dir_clean:
+                return {base: "LONG", quote: "SHORT"}
+            else:
+                return {base: "SHORT", quote: "LONG"}
+        return {}
+
     def _is_position_risk_free(self, pos: Dict[str, Any]) -> bool:
         """
         Determines if an open position's Stop Loss is already locked at or better than
@@ -412,6 +436,24 @@ class RiskManager:
         for c in candidate_currencies:
             if curr_counts.get(c, 0) >= 2:
                 return False, f"CORRELATION LIMIT: Maximum at-risk exposure for currency '{c}' reached ({curr_counts[c]} at-risk/pending)", 0.0
+
+        # 3.6 Institutional Currency Directional Alignment Guard (No Self-Fighting)
+        # Prevents holding contradictory exposures (e.g. LONG CAD via EURCAD SELL and SHORT CAD via USDCAD BUY)
+        candidate_exposures = self._get_directional_currency_exposures(symbol, direction)
+        all_active_trades = open_positions + pending_orders
+        for trade in all_active_trades:
+            t_sym = trade.get("symbol", "")
+            t_dir = trade.get("direction", "BUY")
+            existing_exposures = self._get_directional_currency_exposures(t_sym, t_dir)
+            for curr, proposed_side in candidate_exposures.items():
+                if curr in existing_exposures:
+                    existing_side = existing_exposures[curr]
+                    if proposed_side != existing_side:
+                        return False, (
+                            f"CURRENCY DIRECTION CONFLICT: Already {existing_side} '{curr}' via {t_sym} {t_dir}. "
+                            f"Cannot open contradictory {proposed_side} '{curr}' via {symbol} {direction}. "
+                            f"All portfolio trades must row in the same macro currency direction."
+                        ), 0.0
 
         # 3.8 Symbol Loss Lockout (Post-loss cooldown to prevent churn)
         is_locked, cooldown_reason = self._check_symbol_loss_cooldown(symbol)

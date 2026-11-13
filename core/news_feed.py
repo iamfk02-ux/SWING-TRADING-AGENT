@@ -20,14 +20,15 @@ BREAKING_CACHE_FILE = Path(__file__).resolve().parent.parent / "data" / "breakin
 WATCHLIST_CURRENCIES = ["USD", "EUR", "GBP", "JPY", "AUD", "CAD", "NZD", "CHF"]
 
 CURRENCY_KEYWORDS = {
-    "USD": ["fed", "federal reserve", "dollar", "powell", "usd", "treasury", "fomc", "united states", "u.s.", "nfp", "wall street"],
+    "USD": ["fed", "federal reserve", "dollar", "powell", "usd", "treasury", "fomc", "united states", "u.s.", "nfp", "wall street", "dxy"],
     "EUR": ["ecb", "lagarde", "euro", "eurozone", "germany", "eur", "bundesbank"],
     "GBP": ["bank of england", "boe", "bailey", "pound", "sterling", "uk", "britain", "gbp", "gilt"],
     "JPY": ["bank of japan", "boj", "ueda", "yen", "jpy", "japan", "tokyo"],
-    "AUD": ["rba", "reserve bank of australia", "aussie", "aud", "australia"],
-    "CAD": ["bank of canada", "boc", "loonie", "cad", "canada"],
+    "AUD": ["rba", "reserve bank of australia", "aussie", "aud", "australia", "iron ore", "copper"],
+    "CAD": ["bank of canada", "boc", "loonie", "cad", "canada", "oil", "crude", "wti", "brent", "petroleum", "opec"],
     "CHF": ["snb", "swiss national bank", "swiss franc", "chf", "switzerland"],
-    "NZD": ["rbnz", "kiwi", "nzd", "new zealand"]
+    "NZD": ["rbnz", "kiwi", "nzd", "new zealand", "dairy", "fonterra"],
+    "XAU": ["gold", "xau", "bullion", "precious metal"]
 }
 
 

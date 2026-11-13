@@ -242,14 +242,14 @@ def run_cycle(cycle_num: int = 1) -> int:
                     # Fetch all exit deals for this position (aggregates partial TP + final exit)
                     matching_deals = [
                         d for d in (closed_deals or [])
-                        if d.position_id == t_ticket and d.entry == 1 and getattr(d, "magic", 0) == 10102026
+                        if d.position_id == t_ticket and d.entry == 1
                     ]
 
                     if not matching_deals:
                         # Pending order was cancelled or expired without ever filling into a position
                         entry_deals = [
                             d for d in (closed_deals or [])
-                            if d.position_id == t_ticket and d.entry == 0 and getattr(d, "magic", 0) == 10102026
+                            if d.position_id == t_ticket and d.entry == 0
                         ]
                         if not entry_deals:
                             cur.execute("DELETE FROM trades WHERE id = ?", (db_id,))
@@ -282,6 +282,8 @@ def run_cycle(cycle_num: int = 1) -> int:
                                 exit_reason = "TAKE PROFIT HIT"
                             elif "so" in comment.lower():
                                 exit_reason = f"STOP OUT / GLITCH ({comment})"
+                            elif getattr(last_deal, "magic", 0) == 0:
+                                exit_reason = f"MANUAL CLOSE ({comment})" if comment else "MANUAL CLOSE"
                             else:
                                 exit_reason = f"CLOSED ({comment})" if comment else "CLOSED"
 

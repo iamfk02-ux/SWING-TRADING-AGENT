@@ -201,6 +201,23 @@ def analyze_news_snippet(text: str, currency: str) -> Dict[str, Any]:
             score -= 1
             reasons.append(f"Bearish signal: '{term}'")
 
+    # Petrodollar (CAD) & Commodity Currency (AUD/NZD) Intermarket Intelligence
+    if currency == "CAD" and any(k in lower for k in ["oil", "wti", "brent", "crude", "petroleum"]):
+        if any(w in lower for w in ["rebounds", "climbs", "rallies", "surges", "rises", "gains", "above", "advances"]):
+            score += 2
+            reasons.append("Petrodollar boost: WTI/Brent Crude Oil strength supporting Canadian Dollar")
+        elif any(w in lower for w in ["drops", "falls", "slumps", "slides", "declines", "below", "pressured", "retreats"]):
+            score -= 2
+            reasons.append("Petrodollar drag: WTI/Brent Crude Oil weakness pressuring Canadian Dollar")
+
+    if currency in ("AUD", "NZD") and any(k in lower for k in ["iron ore", "copper", "dairy", "china stimulus", "gold"]):
+        if any(w in lower for w in ["rebounds", "climbs", "rallies", "surges", "rises", "gains", "boosts"]):
+            score += 1
+            reasons.append(f"Commodity export tailwind supporting {currency}")
+        elif any(w in lower for w in ["drops", "falls", "slumps", "slides", "weakens"]):
+            score -= 1
+            reasons.append(f"Commodity export headwind pressuring {currency}")
+
     if score >= 2:
         bias = 1
         verdict = "🟢 Strong Bullish (+1)"
