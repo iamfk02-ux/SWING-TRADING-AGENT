@@ -181,10 +181,12 @@ class RiskManager:
                     hours_elapsed = max(0.0, (now_time - exit_dt).total_seconds() / 3600.0)
 
                     if hours_elapsed < self.symbol_loss_cooldown_hours:
-                        is_loss = (pnl_usd is not None and pnl_usd < 0) or ("STOP LOSS" in str(exit_reason).upper())
-                        if is_loss:
+                        # Strictly check for an actual net dollar loss (pnl_usd < -0.01)
+                        # Break-even runners, trailing stops, and partial-TP winners must NEVER trigger a loss lockout!
+                        is_actual_loss = (pnl_usd is not None and float(pnl_usd) < -0.01)
+                        if is_actual_loss:
                             hours_left = self.symbol_loss_cooldown_hours - hours_elapsed
-                            return True, f"SYMBOL COOLDOWN ACTIVE: {symbol} had a losing exit ({exit_reason}) {hours_elapsed:.1f}h ago. Standing aside for {hours_left:.1f}h to prevent churn."
+                            return True, f"SYMBOL COOLDOWN ACTIVE: {symbol} had a losing exit (${float(pnl_usd):+.2f} - {exit_reason}) {hours_elapsed:.1f}h ago. Standing aside for {hours_left:.1f}h to prevent churn."
         except Exception:
             pass
         return False, ""
