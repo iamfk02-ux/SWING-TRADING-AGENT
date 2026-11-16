@@ -36,7 +36,7 @@ from agents.risk_manager import RiskManager
 from agents.execution_agent import ExecutionAgent
 from core.database import init_db, log_signal
 from core.indicators import compute_atr
-from core.telegram_notifier import TelegramNotifier
+from core.telegram_notifier import TelegramNotifier, format_duration_human
 from core.config_loader import load_config
 
 try:
@@ -390,7 +390,9 @@ def run_cycle(cycle_num: int = 1) -> int:
                     is_any_tier1 = any(news_guard.is_tier1_event(t) for t in cluster["titles"])
                     buffer_mins = news_guard.tier1_blackout_minutes_before if is_any_tier1 else news_guard.blackout_minutes_before
                     tier_str = "Tier-1 Super-Shield" if is_any_tier1 else "High-Impact"
-                    action_desc = f"New entries on {ev_curr} frozen ({buffer_mins}m {tier_str} blackout window)."
+                    time_left_str = format_duration_human(mins_left)
+                    buffer_str = format_duration_human(buffer_mins)
+                    action_desc = f"New entries on {ev_curr} frozen ({buffer_str} {tier_str} blackout window)."
                     if affected_syms:
                         action_desc += f" Protecting open positions ({', '.join(affected_syms)}) against spread widening."
                     notifier.notify_news_shield_warning(
@@ -400,7 +402,7 @@ def run_cycle(cycle_num: int = 1) -> int:
                         affected_positions=affected_syms,
                         shield_action=action_desc
                     )
-                    append_live_log(f"🚨 [NEWS SHIELD ALERT] {combined_title} ({ev_curr}) in ~{mins_left}m! Active positions affected: {affected_syms or 'None'}")
+                    append_live_log(f"🚨 [NEWS SHIELD ALERT] {combined_title} ({ev_curr}) in ~{time_left_str}! Active positions affected: {affected_syms or 'None'}")
 
                 # Automated Position Defense: If in profit (>= +0.5R), secure Stop Loss to Break-Even
                 if news_cfg.get("auto_breakeven_before_news", True):

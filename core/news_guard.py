@@ -186,12 +186,18 @@ class NewsGuard:
             # If event is upcoming within the safety buffer:
             if 0 <= time_diff_mins <= limit_before:
                 mins = int(time_diff_mins)
-                return True, f"{tier_tag}: '{title}' ({event_currency}) in {mins}m ({limit_before}m blackout)"
+                from core.telegram_notifier import format_duration_human
+                time_fmt = format_duration_human(mins)
+                limit_fmt = format_duration_human(limit_before)
+                return True, f"{tier_tag}: '{title}' ({event_currency}) in ~{time_fmt} ({limit_fmt} blackout)"
 
             # If event occurred within the safety buffer:
             if -limit_after <= time_diff_mins < 0:
                 mins_ago = int(abs(time_diff_mins))
-                return True, f"{tier_tag}: '{title}' ({event_currency}) released {mins_ago}m ago ({limit_after}m blackout)"
+                from core.telegram_notifier import format_duration_human
+                time_fmt = format_duration_human(mins_ago)
+                limit_fmt = format_duration_human(limit_after)
+                return True, f"{tier_tag}: '{title}' ({event_currency}) released ~{time_fmt} ago ({limit_fmt} blackout)"
 
         return False, None
 

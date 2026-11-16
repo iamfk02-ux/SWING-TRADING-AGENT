@@ -79,28 +79,25 @@ def get_upcoming_economic_events(*args, **kwargs) -> List[Dict[str, Any]]:
                     formatted_date = dt.strftime("%b %d, %H:%M UTC")
                     diff_m = (dt - now).total_seconds() / 60.0
 
+                    from core.telegram_notifier import format_duration_human
                     if is_tier1:
                         if 0 <= diff_m <= guard.tier1_blackout_minutes_before:
-                            status_text = f"🛡️ Shield Active (In {int(diff_m)}m)"
+                            status_text = f"🛡️ Shield Active (In ~{format_duration_human(diff_m)})"
                         elif -guard.tier1_blackout_minutes_after <= diff_m < 0:
-                            status_text = f"🛡️ Shield Active ({int(abs(diff_m))}m ago)"
+                            status_text = f"🛡️ Shield Active (~{format_duration_human(abs(diff_m))} ago)"
                         elif diff_m > guard.tier1_blackout_minutes_before:
-                            hrs = int(diff_m / 60)
-                            status_text = f"In {hrs}h" if hrs > 1 else f"In {int(diff_m)}m"
+                            status_text = f"In {format_duration_human(diff_m)}"
                         else:
-                            hrs_ago = int(abs(diff_m) / 60)
-                            status_text = f"Passed ({hrs_ago}h ago)" if hrs_ago > 1 else f"Passed ({int(abs(diff_m))}m ago)"
+                            status_text = f"Passed ({format_duration_human(abs(diff_m))} ago)"
                     else:
                         if 0 <= diff_m <= guard.blackout_minutes_before:
-                            status_text = f"🛡️ Shield Active (In {int(diff_m)}m)"
+                            status_text = f"🛡️ Shield Active (In ~{format_duration_human(diff_m)})"
                         elif -guard.blackout_minutes_after <= diff_m < 0:
-                            status_text = f"🛡️ Shield Active ({int(abs(diff_m))}m ago)"
+                            status_text = f"🛡️ Shield Active (~{format_duration_human(abs(diff_m))} ago)"
                         elif diff_m > guard.blackout_minutes_before:
-                            hrs = int(diff_m / 60)
-                            status_text = f"In {hrs}h" if hrs > 1 else f"In {int(diff_m)}m"
+                            status_text = f"In {format_duration_human(diff_m)}"
                         else:
-                            hrs_ago = int(abs(diff_m) / 60)
-                            status_text = f"Passed ({hrs_ago}h ago)" if hrs_ago > 1 else f"Passed ({int(abs(diff_m))}m ago)"
+                            status_text = f"Passed ({format_duration_human(abs(diff_m))} ago)"
                 except Exception:
                     pass
 

@@ -18,6 +18,35 @@ from core.config_loader import load_config
 urllib3_cn.allowed_gai_family = lambda: socket.AF_INET
 
 
+def format_duration_human(minutes: int) -> str:
+    """
+    Formats duration in minutes into a clean, human-readable format.
+    E.g.:
+      119 -> '1hr 59mins'
+      80  -> '1hr 20mins'
+      60  -> '1hr'
+      120 -> '2hrs'
+      45  -> '45 mins'
+      1   -> '1 min'
+    """
+    try:
+        minutes = int(round(minutes))
+    except (ValueError, TypeError):
+        return f"{minutes} mins"
+
+    if minutes >= 60:
+        hrs = minutes // 60
+        rem = minutes % 60
+        hr_label = "1hr" if hrs == 1 else f"{hrs}hrs"
+        if rem > 0:
+            return f"{hr_label} {rem}mins"
+        return hr_label
+    elif minutes == 1:
+        return "1 min"
+    else:
+        return f"{minutes} mins"
+
+
 class TelegramNotifier:
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         if config is None:
@@ -198,15 +227,16 @@ class TelegramNotifier:
         affected_positions: list,
         shield_action: str
     ):
+        time_str = format_duration_human(minutes_until)
         if affected_positions:
             pos_text = ", ".join(affected_positions)
             msg = (
                 f"🛡️ *NEWS SHIELD: {currency} HIGH-IMPACT*\n"
                 f"━━━━━━━━━━━━━━━━━━\n"
                 f"📅 *Event:* {event_title}\n"
-                f"⏳ *Release:* In ~{minutes_until} mins\n"
+                f"⏳ *Release:* In ~{time_str}\n"
                 f"🎯 *Guarded Trades:* `{pos_text}` (SL Protected)\n"
-                f"🚫 *Entries:* Paused for 30m blackout\n"
+                f"🚫 *Action:* {shield_action or 'Entries Paused for News Blackout'}\n"
                 f"━━━━━━━━━━━━━━━━━━"
             )
         else:
@@ -214,9 +244,9 @@ class TelegramNotifier:
                 f"📰 *NEWS HEADS-UP: {currency}*\n"
                 f"━━━━━━━━━━━━━━━━━━\n"
                 f"📅 *Event:* {event_title}\n"
-                f"⏳ *Release:* In ~{minutes_until} mins\n"
+                f"⏳ *Release:* In ~{time_str}\n"
                 f"🔒 *Exposure:* Clean (0 open trades)\n"
-                f"🚫 *Entries:* Paused for 30m blackout\n"
+                f"🚫 *Action:* {shield_action or 'Entries Paused for News Blackout'}\n"
                 f"━━━━━━━━━━━━━━━━━━"
             )
         self.send_message(msg)
