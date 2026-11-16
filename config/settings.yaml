@@ -136,7 +136,7 @@ risk:
     enabled: true
     start_utc_hour: 7              # 07:00 UTC (London Open / Frankfurt active)
     start_utc_minute: 0
-    end_utc_hour: 17               # 17:00 UTC (London Close / US Session active)
+    end_utc_hour: 21               # 21:00 UTC (Full US Session active through London & NY)
     end_utc_minute: 0
     allow_asian_session_for_jpy_aud: false # Enforce London/NY peak liquidity across all pairs
   # 5:00 PM EST Rollover Shield (Upgrade #2)

@@ -340,7 +340,10 @@ class RiskManager:
         # 0.02 Session Liquidity Filter (Peak London/NY liquidity hours only)
         out_session, session_reason = self._is_outside_liquidity_session(symbol, now_utc)
         if out_session:
-            return False, session_reason, 0.0
+            if signal.get("strategy") == "POST_NEWS_MOMENTUM":
+                pass  # Authorized post-news repricing wave
+            else:
+                return False, session_reason, 0.0
 
         # 0.1 Minimum Stop Floor Enforcement (Mandatory 20-pip safety floor)
         # Prevents overnight and Asian-session whipsaws from clipping tight stops
