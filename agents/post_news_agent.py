@@ -106,39 +106,51 @@ class PostNewsMomentumAgent:
             # Indecisive news candle (wicks on both sides / doji) -> skip
             return None
 
-        # Filter 3: Check subsequent confirmation candles (from news_idx + 1 up to latest closed bar)
-        post_news_bars = df_m15.iloc[news_idx + 1 : -1]  # exclude active unclosed candle
-        if post_news_bars.empty:
-            return None
-
-        latest_closed = df_m15.iloc[-2]
-        latest_close = float(latest_closed["close"])
-        latest_high = float(latest_closed["high"])
-        latest_low = float(latest_closed["low"])
-        latest_open = float(latest_closed["open"])
-
+        # Filter 3: Check confirmation trigger
         direction: Optional[str] = None
         confirmation_type: Optional[str] = None
+        latest_close = news_close
 
-        if is_bullish_impulse:
-            # Setup A: Breakout confirmation (latest close above news high)
-            if latest_close > news_high:
+        if news_idx == -2:
+            # Stage A: The 15-minute news reaction candle has JUST confirmed closed (minutes 15-30)
+            # The strong close itself provides immediate institutional impulse confirmation
+            if is_bullish_impulse:
                 direction = "BUY"
-                confirmation_type = "BREAKOUT"
-            # Setup B: Retest & Bounce confirmation (shallow pullback held above 38.2% fib of news candle)
-            elif (latest_low >= (news_low + 0.382 * news_range)) and (latest_close > latest_open):
-                direction = "BUY"
-                confirmation_type = "RETEST_BOUNCE"
+                confirmation_type = "NEWS_IMPULSE_CLOSE"
+            elif is_bearish_impulse:
+                direction = "SELL"
+                confirmation_type = "NEWS_IMPULSE_CLOSE"
+        else:
+            # Stage B: Minutes 30 to 120 - check subsequent closed confirmation bars
+            post_news_bars = df_m15.iloc[news_idx + 1 : -1]  # exclude active unclosed candle
+            if post_news_bars.empty:
+                return None
 
-        elif is_bearish_impulse:
-            # Setup A: Breakdown confirmation (latest close below news low)
-            if latest_close < news_low:
-                direction = "SELL"
-                confirmation_type = "BREAKDOWN"
-            # Setup B: Retest & Rejection confirmation (pullback held below 61.8% of news candle)
-            elif (latest_high <= (news_high - 0.382 * news_range)) and (latest_close < latest_open):
-                direction = "SELL"
-                confirmation_type = "RETEST_REJECT"
+            latest_closed = df_m15.iloc[-2]
+            latest_close = float(latest_closed["close"])
+            latest_high = float(latest_closed["high"])
+            latest_low = float(latest_closed["low"])
+            latest_open = float(latest_closed["open"])
+
+            if is_bullish_impulse:
+                # Setup 1: Breakout confirmation (latest close above news high)
+                if latest_close > news_high:
+                    direction = "BUY"
+                    confirmation_type = "BREAKOUT"
+                # Setup 2: Retest & Bounce confirmation (shallow pullback held above 38.2% fib of news candle)
+                elif (latest_low >= (news_low + 0.382 * news_range)) and (latest_close > latest_open):
+                    direction = "BUY"
+                    confirmation_type = "RETEST_BOUNCE"
+
+            elif is_bearish_impulse:
+                # Setup 1: Breakdown confirmation (latest close below news low)
+                if latest_close < news_low:
+                    direction = "SELL"
+                    confirmation_type = "BREAKDOWN"
+                # Setup 2: Retest & Rejection confirmation (pullback held below 61.8% of news candle)
+                elif (latest_high <= (news_high - 0.382 * news_range)) and (latest_close < latest_open):
+                    direction = "SELL"
+                    confirmation_type = "RETEST_REJECT"
 
         if not direction:
             return None
