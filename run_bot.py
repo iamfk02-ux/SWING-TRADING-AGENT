@@ -144,13 +144,19 @@ def run_cycle(cycle_num: int = 1) -> int:
     open_positions = exec_agent.get_open_positions()
     raw_pending_orders = exec_agent.get_pending_orders()
 
-    # 0A. Clean up stale pending orders (> 4h expiry, session close >= 18:00 UTC, or Friday cutoff >= 14:00 UTC)
+    # 0A. Clean up stale pending orders (> 4h expiry, session close sweep, or Friday cutoff)
     expiry_hours = config.get("risk", {}).get("pending_order_expiry_hours", 4)
     cancel_outside_session = config.get("risk", {}).get("cancel_pending_outside_session", True)
     friday_cutoff_h = config.get("risk", {}).get("friday_cutoff_utc_hour", 14)
+    session_cfg = config.get("risk", {}).get("session_filter", {})
+    session_start_h = session_cfg.get("start_utc_hour", 7)
+    session_end_h = session_cfg.get("end_utc_hour", 21)
+    
     now_utc_dt = datetime.now(timezone.utc)
-    is_post_session = cancel_outside_session and (now_utc_dt.hour >= 18 or now_utc_dt.hour < 7)
+    is_post_session = cancel_outside_session and (now_utc_dt.hour >= session_end_h or now_utc_dt.hour < session_start_h)
     is_friday_cutoff = cancel_outside_session and (now_utc_dt.weekday() == 4 and now_utc_dt.hour >= friday_cutoff_h)
+
+    notifier = TelegramNotifier(config)
 
     pending_orders = []
     current_time_sec = time.time()
@@ -159,24 +165,26 @@ def run_cycle(cycle_num: int = 1) -> int:
         p_sym = pend.get("symbol", "")
         setup_time = pend.get("time_setup", 0)
         age_h = (current_time_sec - setup_time) / 3600.0 if setup_time > 0 else 0.0
+        o_type_str = pend.get("type_str", "LIMIT")
 
         if is_friday_cutoff:
             if exec_agent.cancel_pending_order(ticket):
                 append_live_log(f"🛡️ [FRIDAY CUTOFF SWEEP] Cancelled unfilled pending order #{ticket} on {p_sym} before weekend close.")
+                notifier.notify_order_cancelled(p_sym, ticket, o_type_str, "Weekend protection cutoff (Friday close)")
                 continue
         elif is_post_session:
             if exec_agent.cancel_pending_order(ticket):
                 append_live_log(f"🛡️ [SESSION CLOSE SWEEP] Cancelled unfilled pending order #{ticket} on {p_sym} ahead of overnight/rollover hours.")
+                notifier.notify_order_cancelled(p_sym, ticket, o_type_str, f"Session close sweep ({session_end_h}:00 UTC)")
                 continue
         elif setup_time > 0 and age_h > expiry_hours:
             if exec_agent.cancel_pending_order(ticket):
                 append_live_log(f"⏰ [EXPIRED PENDING ORDER] Cancelled #{ticket} on {p_sym} (Age: {age_h:.1f}h > {expiry_hours}h limit).")
+                notifier.notify_order_cancelled(p_sym, ticket, o_type_str, f"Order expired unfilled after {expiry_hours}h limit")
                 continue
         pending_orders.append(pend)
 
     append_live_log(f"Active MT5 Positions: {len(open_positions)} | Pending Orders: {len(pending_orders)}")
-
-    notifier = TelegramNotifier(config)
 
     # 0B. Failsafe Live Position Notification Tracker (Catches filled LIMIT/STOP orders & any missed entry alerts)
     try:

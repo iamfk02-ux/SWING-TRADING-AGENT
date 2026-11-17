@@ -112,7 +112,14 @@ class TelegramNotifier:
         macro_bias: Optional[str] = None,
         macro_narrative: Optional[str] = None
     ):
-        title = "🚀 *TRADE OPENED*" if order_type.upper() == "MARKET" else f"⏳ *{order_type.upper()} ORDER PLACED*"
+        is_pending = order_type.upper() in ("LIMIT", "STOP")
+        if is_pending:
+            title = f"⏳ *PENDING {order_type.upper()} ORDER PLACED*"
+            status_line = f"⚠️ *Status:* Resting Pending Order (Will fill ONLY if price pulls back to `{entry:.5f}`)\n"
+        else:
+            title = "🚀 *LIVE TRADE OPENED*"
+            status_line = "✅ *Status:* Filled & Active Market Position\n"
+
         ticket_line = f"🎫 *Ticket:* `#{ticket}`\n" if ticket else ""
         macro_section = ""
         if macro_bias:
@@ -127,9 +134,10 @@ class TelegramNotifier:
             f"📈 *Symbol:* `{symbol}`\n"
             f"🎯 *Strategy:* `{strategy}`\n"
             f"🔄 *Direction:* *{direction}*\n"
+            f"{status_line}"
             f"{macro_section}"
             f"📦 *Volume:* `{lots:.2f} lots`\n"
-            f"💰 *Entry:* `{entry:.5f}`\n"
+            f"💰 *Target Entry:* `{entry:.5f}`\n"
             f"🛑 *Stop Loss:* `{sl:.5f}`\n"
             f"🏆 *Target:* `{f'{tp:.5f}' if tp else 'Trailing Stop'}`\n"
             f"⭐ *Score:* `{score:.2f}`\n"
@@ -137,7 +145,7 @@ class TelegramNotifier:
         )
         markup = None
         if ticket:
-            if order_type.upper() in ("LIMIT", "STOP"):
+            if is_pending:
                 markup = {
                     "inline_keyboard": [
                         [
@@ -157,6 +165,17 @@ class TelegramNotifier:
                     ]
                 }
         return self.send_message(msg, reply_markup=markup)
+
+    def notify_order_cancelled(self, symbol: str, ticket: int, order_type: str, reason: str):
+        msg = (
+            f"🚫 *PENDING ORDER CANCELLED*\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"🎫 *Ticket:* `#{ticket}`\n"
+            f"📈 *Symbol:* `{symbol}` ({order_type.upper()})\n"
+            f"ℹ️ *Reason:* {reason}\n"
+            f"━━━━━━━━━━━━━━━━━━"
+        )
+        return self.send_message(msg)
 
     def notify_breakeven(self, symbol: str, new_sl: float):
         msg = (
