@@ -821,13 +821,13 @@ def run_cycle(cycle_num: int = 1) -> int:
     update_scanner_matrix(scanner_matrix_rows)
     now = datetime.now()
     from datetime import timedelta
-    next_s = now + timedelta(seconds=300)
+    next_s = now + timedelta(seconds=60)
     update_heartbeat(
         status="Cycle complete",
         cycle_count=cycle_num,
         last_cycle_time=now.strftime("%Y-%m-%d %H:%M:%S"),
         next_cycle_time=next_s.strftime("%Y-%m-%d %H:%M:%S"),
-        seconds_remaining=300,
+        seconds_remaining=60,
         scanned_count=scanned_count,
         active_positions=len(open_positions),
         balance=balance,
@@ -868,9 +868,9 @@ def main():
     append_live_log("=" * 65)
     append_live_log("    SWING MULTI-AGENT TRADING BOT - LIVE ENGINE ONLINE")
     append_live_log("=" * 65)
-    append_live_log(f"Active Timeframe: {timeframe} Candles (Lower Timeframe Scanning)")
-    append_live_log("Market Coverage: Forex & Metals (XAUUSD) - 24/5")
-    append_live_log("Cycle Interval: 5 Minutes (300 seconds)")
+    append_live_log(f"Active Timeframe: {timeframe} Value-Zone + M15 Kill-Zone Sniper")
+    append_live_log("Market Coverage: 10 Forex Pairs - 24/5")
+    append_live_log("Cycle Interval: 1 Minute (60 seconds)")
 
     # Launch 2-Way Interactive Telegram Mobile Controller silently (no startup popup spam)
     tg_controller = None
@@ -901,9 +901,9 @@ def main():
             # Countdown sleep loop (updates heartbeat every 5 seconds)
             scan_finish = datetime.now()
             from datetime import timedelta
-            next_scan = scan_finish + timedelta(seconds=300)
+            next_scan = scan_finish + timedelta(seconds=60)
             
-            append_live_log(f"💤 Bot sleeping. Next scan in 5m 00s (at {next_scan.strftime('%H:%M:%S')})...")
+            append_live_log(f"💤 Bot sleeping. Next scan in 1m 00s (at {next_scan.strftime('%H:%M:%S')})...")
 
             while datetime.now() < next_scan:
                 if not pid_file.exists():

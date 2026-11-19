@@ -347,7 +347,7 @@ if is_wknd:
     st.info("🕒 **Weekend Mode Active:** Traditional Forex and Metals markets are closed. Scanner is standing by until markets reopen Sunday 5:00 PM EST.")
 else:
     mode_txt = "Top-Down Institutional (D1 → H4 Value-Zone → M15 Kill-Zone Sniper)"
-    st.success(f"🟢 **Weekday Market Active:** Actively scanning {num_pairs} Forex pairs on **{mode_txt}** every 5 minutes.")
+    st.success(f"🟢 **Weekday Market Active:** Actively scanning {num_pairs} Forex pairs on **{mode_txt}** every 1 minute.")
 
 try:
     import MetaTrader5 as mt5
