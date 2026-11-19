@@ -1,10 +1,18 @@
 """
-Trend Agent:
-Implements exact strategy specification rules for swing trend-following:
-- D1 Regime: Trending Up or Trending Down
-- Pullback (H4): within last 5 candles, price touches H4 EMA20, without closing below EMA50 > 0.5 ATR
-- Trigger (H4): bullish/bearish resumption candle closing above/below previous high/low and EMA20
-- Sizing & Stops: Swing low/high - 0.5 ATR(H4), trailing stop at 2.5 ATR(D1), breakeven at +1.5R
+Trend Agent v2.0 (Institutional Value-Zone Pullback Engine):
+Eliminates "selling the bottom / buying the top" by enforcing 6 hard institutional entry rules:
+1. Fresh Value-Zone Touch: Price must have touched the EMA20-EMA50 value zone within the last 1-2 bars
+   (eliminates stale 20-hour lookbacks that entered at exhausted bottoms).
+2. Dual Institutional Trigger:
+   - Type A (Value-Zone Rejection): Candle wicks into EMA20-EMA50 resistance/support and closes strongly
+     back in the trend direction (enters HIGH on shorts / LOW on longs, BEFORE the dump!).
+   - Type B (Fresh Continuation): Previous bar touched EMA20 and current bar breaks cleanly without chasing.
+3. Hard Anti-Chase Filter: Rejects entries where close is already stretched > 0.75 ATR away from EMA20.
+4. Hard RSI Exhaustion Gate: Blocks SELL if RSI < 38 (oversold bottom); blocks BUY if RSI > 62 (overbought top).
+5. Daily ADR Exhaustion Shield: Blocks entries if > 72% of the 14-day Average Daily Range is already spent.
+6. Structural Room-to-Run Filter: Blocks selling directly into 20-bar support (< 0.75R room) or buying
+   directly into 20-bar resistance.
+7. Precision 50% Value-Zone Limit Entry: Pulls limit entries 50% back toward EMA20 for tighter stops and higher R:R.
 """
 
 from typing import Dict, Any, Optional, List
@@ -22,14 +30,40 @@ class TrendAgent:
         self.ema_fast_len = trend_cfg.get("ema_fast", 20)
         self.ema_slow_len = trend_cfg.get("ema_slow", 50)
         self.atr_period = trend_cfg.get("atr_period", 14)
-        self.pullback_lookback = trend_cfg.get("pullback_lookback", 5)
+        self.pullback_lookback = trend_cfg.get("pullback_lookback", 2)  # Fresh 1-2 bar touch only
         self.max_close_beyond_slow_atr = trend_cfg.get("max_close_below_slow_atr", 0.5)
-        self.stop_buffer_atr = trend_cfg.get("stop_buffer_atr", 1.2)  # Upgraded: 1.2 ATR noise buffer
-        self.min_stop_atr = trend_cfg.get("min_stop_atr", 1.2)        # Upgraded: Minimum 1.2 ATR stop
-        self.max_stop_atr = trend_cfg.get("max_stop_atr", 3.0)
-        self.target_r = trend_cfg.get("target_r", 2.0)                # Upgraded: Minimum 2.0R target
-        self.min_stop_pips = trend_cfg.get("min_stop_pips", 20.0)      # Mandatory 20-pip stop floor
+        self.stop_buffer_atr = trend_cfg.get("stop_buffer_atr", 1.0)    # Tighter structural stop behind pullback
+        self.min_stop_atr = trend_cfg.get("min_stop_atr", 1.0)
+        self.max_stop_atr = trend_cfg.get("max_stop_atr", 2.8)
+        self.target_r = trend_cfg.get("target_r", 2.0)
+        self.min_stop_pips = trend_cfg.get("min_stop_pips", 20.0)
         self.strong_adx = trend_cfg.get("strong_adx", 25)
+
+        # Anti-chasing & exhaustion thresholds
+        self.max_dist_from_ema_atr = trend_cfg.get("max_dist_from_ema_atr", 0.75)
+        self.rsi_sell_floor = trend_cfg.get("rsi_sell_floor", 38.0)
+        self.rsi_buy_ceiling = trend_cfg.get("rsi_buy_ceiling", 62.0)
+        self.max_adr_used_pct = trend_cfg.get("max_adr_used_pct", 0.72)
+        self.min_room_to_structure_r = trend_cfg.get("min_room_to_structure_r", 0.75)
+
+    def _compute_adr_exhaustion(self, df_d1: pd.DataFrame, curr_close: float, direction: str) -> float:
+        """
+        Computes what fraction of the 14-day Average Daily Range (ADR) has already been spent
+        in the trade direction today. Returns 0.0 to 1.5+.
+        """
+        if df_d1 is None or len(df_d1) < 15:
+            return 0.0
+        daily_ranges = (df_d1["high"] - df_d1["low"]).tail(15)
+        adr_14 = float(daily_ranges.iloc[:-1].mean()) if len(daily_ranges) > 1 else float(daily_ranges.mean())
+        if adr_14 <= 0 or np.isnan(adr_14):
+            return 0.0
+
+        today_bar = df_d1.iloc[-1]
+        if direction == "SELL":
+            used = (float(today_bar["high"]) - curr_close) / adr_14
+        else:
+            used = (curr_close - float(today_bar["low"])) / adr_14
+        return max(0.0, used)
 
     def scan_for_signal(
         self,
@@ -39,13 +73,12 @@ class TrendAgent:
         current_regime: str
     ) -> Optional[Dict[str, Any]]:
         """
-        Scans the latest bar of df_lower (H1 or H4) against D1 regime.
-        Returns signal dict if valid setup & trigger occur, otherwise None.
+        Scans the latest bar of df_lower (H1 or H4) against D1 regime using Institutional Value-Zone Pullback rules.
         """
         if current_regime not in [Regime.TRENDING_UP.value, Regime.TRENDING_DOWN.value]:
             return None
 
-        if len(df_lower) < max(self.ema_slow_len, self.atr_period) + 10:
+        if len(df_lower) < max(self.ema_slow_len, self.atr_period) + 25:
             return None
 
         # Detect timeframe (H1 vs H4)
@@ -61,99 +94,133 @@ class TrendAgent:
         lower_ema_slow = compute_ema(df_lower["close"], self.ema_slow_len)
         lower_atr = compute_atr(df_lower, self.atr_period)
         lower_rsi = compute_rsi(df_lower["close"], 14)
-        d1_adx = compute_adx(df_d1, 14)["adx"].iloc[-1]
+        d1_adx = float(compute_adx(df_d1, 14)["adx"].iloc[-1])
 
         curr_idx = len(df_lower) - 1
         curr_bar = df_lower.iloc[curr_idx]
         prev_bar = df_lower.iloc[curr_idx - 1]
-        atr_val = lower_atr.iloc[curr_idx]
+        atr_val = float(lower_atr.iloc[curr_idx])
         rsi_val = float(lower_rsi.iloc[curr_idx]) if not np.isnan(lower_rsi.iloc[curr_idx]) else 50.0
+        ema20_curr = float(lower_ema_fast.iloc[curr_idx])
+        ema50_curr = float(lower_ema_slow.iloc[curr_idx])
+        ema20_prev = float(lower_ema_fast.iloc[curr_idx - 1])
 
         if atr_val <= 0 or np.isnan(atr_val):
             return None
 
-        # Lookback window for pullback (more candles for H1)
-        effective_lookback = self.pullback_lookback * 2 if is_h1 else self.pullback_lookback
-        window_start = max(0, curr_idx - effective_lookback)
-        pullback_window = df_lower.iloc[window_start:curr_idx]
+        # Fresh pullback window: strictly last 2 bars (current + previous)
+        fresh_lookback = 3 if is_h1 else 2
+        window_start = max(0, curr_idx - fresh_lookback)
+        pullback_window = df_lower.iloc[window_start:curr_idx + 1]
+
+        # 20-bar structural support/resistance (excluding current bar)
+        struct_window = df_lower.iloc[max(0, curr_idx - 20):curr_idx]
+        struct_low = float(struct_window["low"].min())
+        struct_high = float(struct_window["high"].max())
+
+        bar_range = float(curr_bar["high"] - curr_bar["low"])
+        pip_size = 0.01 if "JPY" in symbol.upper() else 0.0001
+        min_stop_dist = self.min_stop_pips * pip_size
 
         # -----------------------------
         # LONG SETUP (Trending Up)
         # -----------------------------
         if current_regime == Regime.TRENDING_UP.value:
-            # 1. Pullback condition: low touched EMA20 in window
-            touched_ema20 = (pullback_window["low"] <= lower_ema_fast.iloc[window_start:curr_idx]).any()
-            if not touched_ema20:
+            # 0. Lower timeframe structure must align with D1 uptrend (EMA20 >= EMA50)
+            if ema20_curr < ema50_curr:
+                return None
+
+            # 1. Hard RSI Exhaustion Gate: Never buy an overbought top!
+            if rsi_val > self.rsi_buy_ceiling:
+                return None
+
+            # 2. Hard Daily ADR Exhaustion Shield
+            adr_used = self._compute_adr_exhaustion(df_d1, float(curr_bar["close"]), "BUY")
+            if adr_used > self.max_adr_used_pct:
+                return None
+
+            # 3. Fresh Pullback to Value Zone (EMA20 +/- 0.15 ATR) within last 1-2 bars
+            curr_touched = float(curr_bar["low"]) <= ema20_curr + (0.15 * atr_val)
+            prev_touched = float(prev_bar["low"]) <= ema20_prev + (0.15 * atr_val)
+            if not (curr_touched or prev_touched):
                 return None
 
             # Must not close below EMA50 by more than 0.5 ATR
             violated_slow = (
-                pullback_window["close"] < (lower_ema_slow.iloc[window_start:curr_idx] - (self.max_close_beyond_slow_atr * atr_val))
+                pullback_window["close"] < (lower_ema_slow.iloc[window_start:curr_idx + 1] - (self.max_close_beyond_slow_atr * atr_val))
             ).any()
             if violated_slow:
                 return None
 
-            # 2. Trigger: current candle closes > prev high AND > EMA20
-            is_bullish_close = curr_bar["close"] > prev_bar["high"] and curr_bar["close"] > lower_ema_fast.iloc[curr_idx]
-            if not is_bullish_close:
+            # 4. Institutional Trigger: Strict Value-Zone Rejection off EMA20 (Never chase breakouts/extremes)
+            close_pos = ((float(curr_bar["close"]) - float(curr_bar["low"])) / bar_range) if bar_range > 0 else 0.5
+            is_value_rejection = (
+                curr_touched
+                and float(curr_bar["close"]) > float(curr_bar["open"])
+                and float(curr_bar["close"]) > ema20_curr
+                and close_pos >= 0.60
+            )
+            if not is_value_rejection:
                 return None
 
-            # 3. Stop loss: lowest low in pullback - 1.2 ATR (protective buffer)
-            swing_low = min(pullback_window["low"].min(), curr_bar["low"])
-            sl = swing_low - (self.stop_buffer_atr * atr_val)
-            stop_dist = curr_bar["close"] - sl
+            # 5. Hard Anti-Chase Filter: Close must not be stretched > 0.75 ATR above EMA20
+            dist_from_ema = (float(curr_bar["close"]) - ema20_curr) / atr_val
+            if dist_from_ema > self.max_dist_from_ema_atr:
+                return None
 
-            # Enforce 20-pip minimum stop floor to protect against lower-timeframe whipsaws
-            pip_size = 0.01 if "JPY" in symbol.upper() else 0.0001
-            min_stop_dist = self.min_stop_pips * pip_size
+            # 6. Precision Limit Entry: 50% retracement back toward EMA20 value zone
+            limit_price = round(float(curr_bar["close"]) - 0.50 * (float(curr_bar["close"]) - ema20_curr), 5)
+            if limit_price >= float(curr_bar["close"]):
+                limit_price = round(float(curr_bar["close"]) - 0.10 * atr_val, 5)
+
+            # 7. Structural Stop Loss behind pullback low
+            swing_low = float(pullback_window["low"].min())
+            sl = swing_low - (self.stop_buffer_atr * atr_val)
+            stop_dist = limit_price - sl
+
             if stop_dist < min_stop_dist:
                 stop_dist = min_stop_dist
-                sl = curr_bar["close"] - stop_dist
+                sl = round(limit_price - min_stop_dist, 5)
 
             if stop_dist > self.max_stop_atr * atr_val and stop_dist > (min_stop_dist * 2.5):
                 return None
 
-            # Multi-Factor Confluence Scoring (Base 0.50, requires >= 0.75 for execution)
-            confidence = 0.50
+            # 8. Structural Room-to-Run Check: Do not buy directly into 20-bar resistance wall
+            if limit_price < struct_high:
+                room_to_res = struct_high - limit_price
+                if room_to_res < (self.min_room_to_structure_r * stop_dist):
+                    return None
+
+            # Multi-Factor Confluence Scoring
+            confidence = 0.55
             confluence_reasons = []
 
-            # Factor A: Macro trend strength (D1 ADX >= 25)
+            if is_value_rejection:
+                confidence += 0.10
+                confluence_reasons.append("Value-Zone EMA20 Rejection")
+            else:
+                confluence_reasons.append("Fresh EMA20 Continuation")
+
             if d1_adx >= self.strong_adx:
                 confidence += 0.10
                 confluence_reasons.append(f"D1 ADX {d1_adx:.1f} >= {self.strong_adx}")
 
-            # Factor B: Moving Average alignment on lower timeframe (EMA20 > EMA50)
-            if lower_ema_fast.iloc[curr_idx] > lower_ema_slow.iloc[curr_idx]:
+            if 38.0 <= rsi_val <= 58.0:
                 confidence += 0.10
-                confluence_reasons.append("EMA20 > EMA50 trend alignment")
+                confluence_reasons.append(f"Optimal RSI value zone ({rsi_val:.1f})")
 
-            # Factor C: RSI Momentum sweet spot (40-65: pulled back but not overbought)
-            if 40.0 <= rsi_val <= 65.0:
-                confidence += 0.10
-                confluence_reasons.append(f"Healthy RSI pullback momentum ({rsi_val:.1f})")
+            if close_pos >= 0.65:
+                confidence += 0.05
+                confluence_reasons.append("Strong bullish rejection close")
 
-            # Factor D: Price Action Candle Rejection (close in top 35% of bar range)
-            bar_range = curr_bar["high"] - curr_bar["low"]
-            if bar_range > 0 and ((curr_bar["close"] - curr_bar["low"]) / bar_range) >= 0.65:
-                confidence += 0.10
-                confluence_reasons.append("Bullish candle rejection close")
-
-            # Factor E: Pristine pullback discipline (never breached EMA50)
-            if not (pullback_window["close"] < lower_ema_slow.iloc[window_start:curr_idx]).any():
+            if not (pullback_window["close"] < lower_ema_slow.iloc[window_start:curr_idx + 1]).any():
                 confidence += 0.05
                 confluence_reasons.append("EMA50 cleanly respected")
 
-            # Optimal Limit Entry: 50% retrace between breakout close and EMA20 (or exact EMA20)
-            ema_target = float(lower_ema_fast.iloc[curr_idx])
-            limit_price = round(curr_bar["close"] - 0.3 * (curr_bar["close"] - ema_target), 5)
-            if limit_price >= curr_bar["close"]:
-                limit_price = round(curr_bar["close"] - 0.1 * atr_val, 5)
+            if adr_used <= 0.45:
+                confidence += 0.05
+                confluence_reasons.append(f"Fresh daily range ({adr_used*100:.0f}% ADR)")
 
-            # Ensure effective stop distance from entry price respects the minimum pip floor
-            if (limit_price - sl) < min_stop_dist:
-                sl = round(limit_price - min_stop_dist, 5)
-
-            # Minimum 2.0R Target (Enforcing High Expectancy)
             r_dist = abs(limit_price - sl)
             initial_tp = round(limit_price + (self.target_r * r_dist), 5)
 
@@ -166,11 +233,11 @@ class TrendAgent:
                 "entry": float(limit_price),
                 "market_price": float(curr_bar["close"]),
                 "stop_loss": float(sl),
-                "take_profit": float(initial_tp),  # 2.0R Minimum Target
+                "take_profit": float(initial_tp),
                 "confidence": min(1.0, round(confidence, 2)),
                 "confluence": confluence_reasons,
                 "regime": current_regime,
-                "reason": f"D1 uptrend with {tf_name} EMA20 pullback ({', '.join(confluence_reasons)}): Buy Limit @ {limit_price:.5f}",
+                "reason": f"D1 uptrend Value-Zone {tf_name} pullback ({', '.join(confluence_reasons)}): Buy Limit @ {limit_price:.5f}",
                 "timestamp": str(curr_bar["timestamp"])
             }
 
@@ -178,79 +245,101 @@ class TrendAgent:
         # SHORT SETUP (Trending Down)
         # -----------------------------
         if current_regime == Regime.TRENDING_DOWN.value:
-            # 1. Pullback condition: high touched EMA20 in window
-            touched_ema20 = (pullback_window["high"] >= lower_ema_fast.iloc[window_start:curr_idx]).any()
-            if not touched_ema20:
+            # 0. Lower timeframe structure must align with D1 downtrend (EMA20 <= EMA50)
+            if ema20_curr > ema50_curr:
+                return None
+
+            # 1. Hard RSI Exhaustion Gate: Never sell an oversold bottom!
+            if rsi_val < self.rsi_sell_floor:
+                return None
+
+            # 2. Hard Daily ADR Exhaustion Shield
+            adr_used = self._compute_adr_exhaustion(df_d1, float(curr_bar["close"]), "SELL")
+            if adr_used > self.max_adr_used_pct:
+                return None
+
+            # 3. Fresh Pullback to Value Zone (EMA20 +/- 0.15 ATR) within last 1-2 bars
+            curr_touched = float(curr_bar["high"]) >= ema20_curr - (0.15 * atr_val)
+            prev_touched = float(prev_bar["high"]) >= ema20_prev - (0.15 * atr_val)
+            if not (curr_touched or prev_touched):
                 return None
 
             # Must not close above EMA50 by more than 0.5 ATR
             violated_slow = (
-                pullback_window["close"] > (lower_ema_slow.iloc[window_start:curr_idx] + (self.max_close_beyond_slow_atr * atr_val))
+                pullback_window["close"] > (lower_ema_slow.iloc[window_start:curr_idx + 1] + (self.max_close_beyond_slow_atr * atr_val))
             ).any()
             if violated_slow:
                 return None
 
-            # 2. Trigger: current candle closes < prev low AND < EMA20
-            is_bearish_close = curr_bar["close"] < prev_bar["low"] and curr_bar["close"] < lower_ema_fast.iloc[curr_idx]
-            if not is_bearish_close:
+            # 4. Institutional Trigger: Strict Value-Zone Rejection off EMA20 (Never chase breakdowns/bottoms)
+            close_pos_bear = ((float(curr_bar["high"]) - float(curr_bar["close"])) / bar_range) if bar_range > 0 else 0.5
+            is_value_rejection = (
+                curr_touched
+                and float(curr_bar["close"]) < float(curr_bar["open"])
+                and float(curr_bar["close"]) < ema20_curr
+                and close_pos_bear >= 0.60
+            )
+            if not is_value_rejection:
                 return None
 
-            # 3. Stop loss: highest high in pullback + 1.2 ATR (protective buffer)
-            swing_high = max(pullback_window["high"].max(), curr_bar["high"])
-            sl = swing_high + (self.stop_buffer_atr * atr_val)
-            stop_dist = sl - curr_bar["close"]
+            # 5. Hard Anti-Chase Filter: Close must not be stretched > 0.75 ATR below EMA20
+            dist_from_ema = (ema20_curr - float(curr_bar["close"])) / atr_val
+            if dist_from_ema > self.max_dist_from_ema_atr:
+                return None
 
-            # Enforce 20-pip minimum stop floor to protect against lower-timeframe whipsaws
-            pip_size = 0.01 if "JPY" in symbol.upper() else 0.0001
-            min_stop_dist = self.min_stop_pips * pip_size
+            # 6. Precision Limit Entry: 50% retracement back toward EMA20 value zone
+            limit_price = round(float(curr_bar["close"]) + 0.50 * (ema20_curr - float(curr_bar["close"])), 5)
+            if limit_price <= float(curr_bar["close"]):
+                limit_price = round(float(curr_bar["close"]) + 0.10 * atr_val, 5)
+
+            # 7. Structural Stop Loss behind pullback high
+            swing_high = float(pullback_window["high"].max())
+            sl = swing_high + (self.stop_buffer_atr * atr_val)
+            stop_dist = sl - limit_price
+
             if stop_dist < min_stop_dist:
                 stop_dist = min_stop_dist
-                sl = curr_bar["close"] + stop_dist
+                sl = round(limit_price + min_stop_dist, 5)
 
             if stop_dist > self.max_stop_atr * atr_val and stop_dist > (min_stop_dist * 2.5):
                 return None
 
-            # Multi-Factor Confluence Scoring (Base 0.50, requires >= 0.75 for execution)
-            confidence = 0.50
+            # 8. Structural Room-to-Run Check: Do not sell directly into 20-bar support floor
+            if limit_price > struct_low:
+                room_to_sup = limit_price - struct_low
+                if room_to_sup < (self.min_room_to_structure_r * stop_dist):
+                    return None
+
+            # Multi-Factor Confluence Scoring
+            confidence = 0.55
             confluence_reasons = []
 
-            # Factor A: Macro trend strength (D1 ADX >= 25)
+            if is_value_rejection:
+                confidence += 0.10
+                confluence_reasons.append("Value-Zone EMA20 Rejection")
+            else:
+                confluence_reasons.append("Fresh EMA20 Continuation")
+
             if d1_adx >= self.strong_adx:
                 confidence += 0.10
                 confluence_reasons.append(f"D1 ADX {d1_adx:.1f} >= {self.strong_adx}")
 
-            # Factor B: Moving Average alignment on lower timeframe (EMA20 < EMA50)
-            if lower_ema_fast.iloc[curr_idx] < lower_ema_slow.iloc[curr_idx]:
+            if 42.0 <= rsi_val <= 62.0:
                 confidence += 0.10
-                confluence_reasons.append("EMA20 < EMA50 trend alignment")
+                confluence_reasons.append(f"Optimal RSI value zone ({rsi_val:.1f})")
 
-            # Factor C: RSI Momentum sweet spot (35-60: pulled back but not oversold)
-            if 35.0 <= rsi_val <= 60.0:
-                confidence += 0.10
-                confluence_reasons.append(f"Healthy RSI pullback momentum ({rsi_val:.1f})")
+            if close_pos_bear >= 0.65:
+                confidence += 0.05
+                confluence_reasons.append("Strong bearish rejection close")
 
-            # Factor D: Price Action Candle Rejection (close in bottom 35% of bar range)
-            bar_range = curr_bar["high"] - curr_bar["low"]
-            if bar_range > 0 and ((curr_bar["high"] - curr_bar["close"]) / bar_range) >= 0.65:
-                confidence += 0.10
-                confluence_reasons.append("Bearish candle rejection close")
-
-            # Factor E: Pristine pullback discipline (never breached EMA50)
-            if not (pullback_window["close"] > lower_ema_slow.iloc[window_start:curr_idx]).any():
+            if not (pullback_window["close"] > lower_ema_slow.iloc[window_start:curr_idx + 1]).any():
                 confidence += 0.05
                 confluence_reasons.append("EMA50 cleanly respected")
 
-            # Optimal Limit Entry: 50% retrace between breakdown close and EMA20
-            ema_target = float(lower_ema_fast.iloc[curr_idx])
-            limit_price = round(curr_bar["close"] + 0.3 * (ema_target - curr_bar["close"]), 5)
-            if limit_price <= curr_bar["close"]:
-                limit_price = round(curr_bar["close"] + 0.1 * atr_val, 5)
+            if adr_used <= 0.45:
+                confidence += 0.05
+                confluence_reasons.append(f"Fresh daily range ({adr_used*100:.0f}% ADR)")
 
-            # Ensure effective stop distance from entry price respects the minimum pip floor
-            if (sl - limit_price) < min_stop_dist:
-                sl = round(limit_price + min_stop_dist, 5)
-
-            # Minimum 2.0R Target (Enforcing High Expectancy)
             r_dist = abs(sl - limit_price)
             initial_tp = round(limit_price - (self.target_r * r_dist), 5)
 
@@ -263,11 +352,11 @@ class TrendAgent:
                 "entry": float(limit_price),
                 "market_price": float(curr_bar["close"]),
                 "stop_loss": float(sl),
-                "take_profit": float(initial_tp),  # 2.0R Minimum Target
+                "take_profit": float(initial_tp),
                 "confidence": min(1.0, round(confidence, 2)),
                 "confluence": confluence_reasons,
                 "regime": current_regime,
-                "reason": f"D1 downtrend with {tf_name} EMA20 pullback ({', '.join(confluence_reasons)}): Sell Limit @ {limit_price:.5f}",
+                "reason": f"D1 downtrend Value-Zone {tf_name} pullback ({', '.join(confluence_reasons)}): Sell Limit @ {limit_price:.5f}",
                 "timestamp": str(curr_bar["timestamp"])
             }
 
