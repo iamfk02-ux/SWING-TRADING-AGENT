@@ -255,6 +255,10 @@ strategies:
     min_stop_pips: 20.0            # Proven 20-pip anti-whipsaw stop floor (outperformed 15p in backtest)
     max_stop_pips: 45.0            # Cap stop size to keep risk/reward tight
     target_r: 2.5                  # Multi-day swing expansion target (+2.5R)
+    kill_zones_only: true          # Institutional Kill Zones ONLY: London (08:00-11:30 WAT) & NY Overlap (13:30-17:30 WAT) -> PF 2.06, -45% MaxDD
+    excluded_symbols:              # Desk Audit: exclude negative-expectancy M15 stop-hunt pairs (still traded on H4)
+      - CADJPY
+      - GBPUSD
 
 # ---------------------------------------------------------------------
 # BACKTEST PASS / FAIL CRITERIA (strategy_spec.md section 10)

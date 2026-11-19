@@ -612,19 +612,8 @@ def run_cycle(cycle_num: int = 1) -> int:
             s_mr_h4["market_price"] = curr_price
             candidate_signals.append(s_mr_h4)
 
-        # 2. H1 Horizon (Momentum Strategy - Confirmed Closed H1 Candle)
-        if df_h1_closed is not None and len(df_h1_closed) >= 50:
-            s_trend_h1 = trend_agent.scan_for_signal(actual_sym, df_d1_closed, df_h1_closed, current_regime)
-            if s_trend_h1:
-                s_trend_h1["timeframe"] = "H1"
-                s_trend_h1["market_price"] = curr_price
-                candidate_signals.append(s_trend_h1)
-
-            s_mr_h1 = mean_rev_agent.scan_for_signal(actual_sym, df_d1_closed, df_h1_closed, current_regime)
-            if s_mr_h1:
-                s_mr_h1["timeframe"] = "H1"
-                s_mr_h1["market_price"] = curr_price
-                candidate_signals.append(s_mr_h1)
+        # 2. H1 Horizon SILENCED (Institutional Desk Audit: Eliminated redundant middle-child H1 noise
+        #    in favor of clean top-down D1 Regime -> H4 v2.0 Value-Zone -> M15 Kill-Zone Sniper hierarchy.)
 
         # 3. D1 Horizon (Breakout Strategy - Confirmed Closed Daily Candle)
         s_break = breakout_agent.scan_for_signal(actual_sym, df_d1_closed, current_regime)

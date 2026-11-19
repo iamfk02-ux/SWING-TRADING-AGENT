@@ -39,6 +39,23 @@ class M15SniperAgent:
         self.min_stop_pips = cfg.get("min_stop_pips", 20.0)
         self.max_stop_pips = cfg.get("max_stop_pips", 45.0)
         self.target_r = cfg.get("target_r", 2.5)
+        self.kill_zones_only = cfg.get("kill_zones_only", True)
+        self.excluded_symbols = [s.upper() for s in cfg.get("excluded_symbols", ["CADJPY", "GBPUSD"])]
+
+    def _is_in_kill_zone(self, bar_timestamp) -> bool:
+        """
+        Institutional Liquidity Kill Zones (backtest-proven PF 2.06 vs 1.06 in dead hours):
+        - London Open Kill Zone:       07:00 - 10:30 UTC (08:00 - 11:30 WAT)
+        - NY / London Overlap Zone:    12:30 - 16:30 UTC (13:30 - 17:30 WAT)
+        """
+        try:
+            ts = pd.to_datetime(bar_timestamp)
+            mins = ts.hour * 60 + ts.minute
+            london = (7 * 60 <= mins <= 10 * 60 + 30)
+            ny_overlap = (12 * 60 + 30 <= mins <= 16 * 60 + 30)
+            return london or ny_overlap
+        except Exception:
+            return True
 
     def _compute_adr_exhaustion(self, df_d1: pd.DataFrame, curr_close: float, direction: str) -> float:
         if df_d1 is None or len(df_d1) < 15:
@@ -69,6 +86,11 @@ class M15SniperAgent:
         if not self.enabled:
             return None
 
+        # Pair-Specific Desk Audit Filter: exclude chronic M15 stop-hunt pairs (e.g. CADJPY, GBPUSD)
+        sym_clean = symbol.upper().replace(".C", "").replace("M", "").replace(".RAW", "")
+        if any(ex in sym_clean for ex in self.excluded_symbols):
+            return None
+
         if current_regime not in (Regime.TRENDING_UP.value, Regime.TRENDING_DOWN.value):
             return None
 
@@ -93,6 +115,11 @@ class M15SniperAgent:
         m15_atr_series = compute_atr(df_m15, self.atr_period)
         curr_idx = len(df_m15) - 1
         bar = df_m15.iloc[curr_idx]
+
+        # Institutional Kill-Zone Gate: strictly avoid dead lunch & late NY chop
+        if self.kill_zones_only and not self._is_in_kill_zone(bar["timestamp"]):
+            return None
+
         m15_atr = float(m15_atr_series.iloc[curr_idx])
 
         c_open = float(bar["open"])
