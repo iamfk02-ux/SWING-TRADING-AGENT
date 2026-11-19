@@ -244,7 +244,8 @@ class TradeManager:
                     final_sl = sl if better_sl else be_level
 
                     exec_agent.modify_sltp(ticket, new_sl=final_sl, new_tp=runner_tp)
-                    logger_func(f"💰 [PARTIAL TP] {sym} #{ticket}: Banked 33% profit (+${pnl_usd_est:,.2f}) on {close_vol} lots @ +{current_r}R! Remaining {rem_vol} lots running risk-free (Target TP: {runner_tp:.5f}).")
+                    pct_lbl = int(round(self.partial_tp_vol_pct * 100))
+                    logger_func(f"💰 [PARTIAL TP] {sym} #{ticket}: Banked {pct_lbl}% profit (+${pnl_usd_est:,.2f}) on {close_vol} lots @ +{current_r}R! Remaining {rem_vol} lots running risk-free (Target TP: {runner_tp:.5f}).")
                     notifier.notify_partial_tp(sym, close_vol, rem_vol, current_price, pnl_usd_est, final_sl)
                     current_vol = rem_vol
                     sl = final_sl

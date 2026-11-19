@@ -684,6 +684,17 @@ def run_cycle(cycle_num: int = 1) -> int:
                 if invalid_live_price or already_traded_bar:
                     continue
 
+                # Runaway-Price / Slippage Guard for MARKET entries (e.g. M15 Sniper / Post-News):
+                # Never chase a market order if live price already ran > 35% of stop distance away from signal close!
+                if str(signal.get("order_type", "MARKET")).upper() == "MARKET" and sig_sl > 0:
+                    sig_entry = float(signal.get("entry", curr_price) or curr_price)
+                    planned_stop_dist = abs(sig_entry - sig_sl)
+                    if planned_stop_dist > 0:
+                        favorable_drift = (curr_price - sig_entry) if sig_dir == "BUY" else (sig_entry - curr_price)
+                        if favorable_drift > (0.35 * planned_stop_dist):
+                            append_live_log(f"⏭️ [{actual_sym}] Skipped {signal['strategy']} MARKET entry: live price already ran {favorable_drift/pip_size:.1f}p past signal close (anti-chase slippage guard).")
+                            continue
+
                 action_badge = "🔥 SETUP FOUND"
                 # 1. Institutional Macro Gatekeeper & Confluence Filter
                 is_macro_approved, macro_mult, macro_reason, macro_data = macro_engine.filter_and_score_signal(
@@ -743,6 +754,26 @@ def run_cycle(cycle_num: int = 1) -> int:
                             )
                             if ticket:
                                 circuit_breaker.record_execution_success()
+                                # Immediately update in-memory open_positions / pending_orders so subsequent
+                                # symbols in this same scan cycle respect max_open_positions & currency exposure!
+                                new_entry_record = {
+                                    "ticket": ticket,
+                                    "symbol": actual_sym,
+                                    "direction": signal["direction"],
+                                    "volume": lots,
+                                    "entry_price": float(signal.get("entry", curr_price)),
+                                    "price": float(signal.get("entry", curr_price)),
+                                    "current_price": curr_price,
+                                    "sl": float(signal["stop_loss"]),
+                                    "tp": float(signal.get("take_profit") or 0.0),
+                                    "profit": 0.0,
+                                    "magic": 10102026
+                                }
+                                if order_type_str.upper() == "MARKET":
+                                    open_positions.append(new_entry_record)
+                                else:
+                                    pending_orders.append(new_entry_record)
+
                                 append_live_log(f"🎉 [{actual_sym}] Live {order_type_str} ({tf_label}) Order Placed in MT5! Ticket #{ticket} (Auto-exp: {expiry_h}h)")
                                 sent_alert = notifier.notify_trade_opened(
                                     symbol=actual_sym,
