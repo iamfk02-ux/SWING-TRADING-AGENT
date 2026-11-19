@@ -31,6 +31,7 @@ from agents.trend_agent import TrendAgent
 from agents.breakout_agent import BreakoutAgent
 from agents.mean_reversion_agent import MeanReversionAgent
 from agents.post_news_agent import PostNewsMomentumAgent
+from agents.m15_sniper_agent import M15SniperAgent
 from agents.signal_scorer import SignalScorer
 from agents.risk_manager import RiskManager
 from agents.execution_agent import ExecutionAgent
@@ -117,6 +118,7 @@ def run_cycle(cycle_num: int = 1) -> int:
     breakout_agent = BreakoutAgent(config)
     mean_rev_agent = MeanReversionAgent(config)
     post_news_agent = PostNewsMomentumAgent(config)
+    m15_sniper_agent = M15SniperAgent(config)
     scorer = SignalScorer(config)
     risk_manager = RiskManager(config)
     if equity > 0:
@@ -652,6 +654,23 @@ def run_cycle(cycle_num: int = 1) -> int:
                                 candidate_signals.append(s_pnm)
                                 append_live_log(f"⚡ [{actual_sym}] Post-News Momentum Signal: {s_pnm['direction']} ({ev_curr} '{ev['title']}', {ev['minutes_ago']}m ago)")
                         break
+
+        # 5. M15 Sniper Horizon (Top-Down D1 -> H4 Value Zone -> M15 Market Structure Shift)
+        if m15_sniper_agent.enabled and current_regime in ("TRENDING_UP", "TRENDING_DOWN"):
+            df_m15_sniper = data_agent.get_m15_bars(actual_sym, count=60)
+            if df_m15_sniper is not None and len(df_m15_sniper) >= 35:
+                df_m15_closed = df_m15_sniper.iloc[:-1].reset_index(drop=True)
+                s_sniper = m15_sniper_agent.scan_for_signal(
+                    symbol=actual_sym,
+                    df_d1=df_d1_closed,
+                    df_h4=df_h4_closed,
+                    df_m15=df_m15_closed,
+                    current_regime=current_regime
+                )
+                if s_sniper:
+                    s_sniper["market_price"] = curr_price
+                    candidate_signals.append(s_sniper)
+                    append_live_log(f"🎯 [{actual_sym}] M15 Sniper MSS Detected: {s_sniper['direction']} @ {s_sniper['entry']:.5f} (SL: {s_sniper['stop_loss']:.5f})")
 
         # Multi-Agent Consensus & Dual-Horizon Conflict Arbitration (Architecture Layer 4)
         if candidate_signals:

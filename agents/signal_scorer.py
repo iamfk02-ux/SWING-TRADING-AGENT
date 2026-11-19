@@ -30,6 +30,22 @@ REGIME_FIT_TABLE = {
         "RANGING": 1.0,
         "HIGH_VOLATILITY": 0.0,
         "UNCLEAR": 0.0,
+    },
+    "M15_SNIPER": {
+        "TRENDING_UP": 1.0,
+        "TRENDING_DOWN": 1.0,
+        "COMPRESSION": 0.0,
+        "RANGING": 0.0,
+        "HIGH_VOLATILITY": 0.5,
+        "UNCLEAR": 0.0,
+    },
+    "POST_NEWS_MOMENTUM": {
+        "TRENDING_UP": 1.0,
+        "TRENDING_DOWN": 1.0,
+        "COMPRESSION": 1.0,
+        "RANGING": 1.0,
+        "HIGH_VOLATILITY": 1.0,
+        "UNCLEAR": 1.0,
     }
 }
 

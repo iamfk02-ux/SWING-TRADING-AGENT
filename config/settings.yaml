@@ -242,6 +242,19 @@ strategies:
     target_r: 2.0                  # Enforce minimum 2.0R reward-to-risk on momentum impulse
     stop_buffer_atr: 0.5           # Buffer behind news reaction base
     min_stop_pips: 20.0            # Anti-whipsaw 20-pip safety floor (never use fragile 8-10 pip stops)
+  m15_sniper:
+    enabled: true                  # Top-Down D1 -> H4 Value Zone -> M15 Market Structure Shift (+17.73R, PF 1.89)
+    h4_ema_fast: 20
+    h4_ema_slow: 50
+    atr_period: 14
+    rsi_sell_floor: 38.0           # Hard RSI Exhaustion Gate: never sell oversold bottom
+    rsi_buy_ceiling: 62.0          # Hard RSI Exhaustion Gate: never buy overbought top
+    max_adr_used_pct: 0.72         # Daily ADR Shield: reject if > 72% of 14-day ADR spent
+    min_body_ratio: 0.55           # Displacement candle body must be >= 55% of range
+    stop_buffer_m15_atr: 0.5       # Structural buffer behind M15 displacement extreme
+    min_stop_pips: 20.0            # Proven 20-pip anti-whipsaw stop floor (outperformed 15p in backtest)
+    max_stop_pips: 45.0            # Cap stop size to keep risk/reward tight
+    target_r: 2.5                  # Multi-day swing expansion target (+2.5R)
 
 # ---------------------------------------------------------------------
 # BACKTEST PASS / FAIL CRITERIA (strategy_spec.md section 10)
