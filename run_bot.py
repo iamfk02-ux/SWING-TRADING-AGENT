@@ -537,21 +537,12 @@ def run_cycle(cycle_num: int = 1) -> int:
             pw_h4 = df_h4.iloc[-10:-1]
             touched_h4 = (pw_h4["low"] <= compute_ema(df_h4["close"], 20).iloc[-10:-1]).any() if current_regime == "TRENDING_UP" else (pw_h4["high"] >= compute_ema(df_h4["close"], 20).iloc[-10:-1]).any()
 
-            touched_h1 = False
-            h1_pips = 0.0
-            if df_h1 is not None and len(df_h1) >= 50:
-                h1_ema20 = float(compute_ema(df_h1["close"], 20).iloc[-1])
-                h1_pips = abs(curr_price - h1_ema20) / pip_size
-                pw_h1 = df_h1.iloc[-15:-1]
-                touched_h1 = (pw_h1["low"] <= compute_ema(df_h1["close"], 20).iloc[-15:-1]).any() if current_regime == "TRENDING_UP" else (pw_h1["high"] >= compute_ema(df_h1["close"], 20).iloc[-15:-1]).any()
-
-            if touched_h4 or touched_h1:
-                action_badge = "PULLBACK DETECTED"
-                tf_ready = "H4 + H1" if (touched_h4 and touched_h1) else ("H4 Swing" if touched_h4 else "H1 Momentum")
-                status_text = f"Pullback active on {tf_ready}! Watching for trigger close (H4: {h4_pips:.1f}p | H1: {h1_pips:.1f}p)."
+            if touched_h4:
+                action_badge = "VALUE ZONE ACTIVE"
+                status_text = f"H4 Value-Zone pullback active ({h4_pips:.1f}p from H4 EMA20)! Watching H4 v2.0 & M15 Kill-Zone Sniper trigger."
             else:
                 action_badge = "WAITING PULLBACK"
-                status_text = f"Trend active. Price {h4_dir} EMA20: H4 ({h4_pips:.1f}p), H1 ({h1_pips:.1f}p). Waiting for pullback."
+                status_text = f"D1 Trend active. Price {h4_dir} H4 EMA20 ({h4_pips:.1f}p). Waiting for pullback into H4 Value Zone."
 
         elif current_regime == "RANGING":
             from core.indicators import compute_rsi, compute_bollinger_bands

@@ -346,8 +346,8 @@ num_pairs = len(config.get("symbols", {}).get("forex", [])) + len(config.get("sy
 if is_wknd:
     st.info("🕒 **Weekend Mode Active:** Traditional Forex and Metals markets are closed. Scanner is standing by until markets reopen Sunday 5:00 PM EST.")
 else:
-    mode_txt = "Dual-Horizon (H4 Swing + H1 Momentum)" if dual_on else f"{active_tf} ({'4-Hour Swing' if active_tf == 'H4' else '1-Hour'})"
-    st.success(f"🟢 **Weekday Market Active:** Actively scanning {num_pairs} Forex & Metals pairs on **{mode_txt}** candles every 5 minutes.")
+    mode_txt = "Top-Down Institutional (D1 → H4 Value-Zone → M15 Kill-Zone Sniper)"
+    st.success(f"🟢 **Weekday Market Active:** Actively scanning {num_pairs} Forex pairs on **{mode_txt}** every 5 minutes.")
 
 try:
     import MetaTrader5 as mt5
@@ -450,8 +450,7 @@ with tab_monitor:
             st.metric("Latest Cycle", f"Cycle #{cyc}", f"Finished at {last_t}")
 
         with c_m4:
-            tf_val = hb_data.get("timeframe", "H4") if hb_data else "H4"
-            st.metric("Monitored Horizon", "H4 + H1", "Dual-Horizon Swing & Momentum")
+            st.metric("Monitored Horizon", "D1 → H4 → M15", "Value-Zone + Kill-Zone Sniper")
 
         col_audit_btn, col_audit_txt = st.columns([1, 2.5])
         with col_audit_btn:
