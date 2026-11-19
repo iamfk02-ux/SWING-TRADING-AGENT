@@ -14,7 +14,33 @@ import xml.etree.ElementTree as ET
 import re
 from pathlib import Path
 from typing import List, Dict, Any
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+import email.utils
+
+WAT = timezone(timedelta(hours=1))
+
+
+def format_to_wat_date(date_str: str) -> str:
+    """Converts RSS pubDate or ISO date strings to human West Africa Time (WAT)."""
+    if not date_str or "WAT" in date_str:
+        return date_str
+    try:
+        parsed_dt = email.utils.parsedate_to_datetime(date_str)
+        if parsed_dt.tzinfo is None:
+            parsed_dt = parsed_dt.replace(tzinfo=timezone.utc)
+        wat_dt = parsed_dt.astimezone(WAT)
+        return wat_dt.strftime("%b %d, %H:%M WAT")
+    except Exception:
+        pass
+    try:
+        parsed_dt = datetime.fromisoformat(date_str)
+        if parsed_dt.tzinfo is None:
+            parsed_dt = parsed_dt.replace(tzinfo=timezone.utc)
+        wat_dt = parsed_dt.astimezone(WAT)
+        return wat_dt.strftime("%b %d, %H:%M WAT")
+    except Exception:
+        pass
+    return date_str
 
 BREAKING_CACHE_FILE = Path(__file__).resolve().parent.parent / "data" / "breaking_news_cache.json"
 WATCHLIST_CURRENCIES = ["USD", "EUR", "GBP", "JPY", "AUD", "CAD", "NZD", "CHF"]
@@ -87,6 +113,14 @@ def get_latest_financial_news(limit: int = 12, force_refresh: bool = False, watc
                     raw_desc = item.find("description").text if item.find("description") is not None else ""
                     desc = clean_html(raw_desc)
                     pub_date = item.find("pubDate").text if item.find("pubDate") is not None else ""
+                    date_display = pub_date.strip()[:22]
+                    if pub_date:
+                        try:
+                            parsed_dt = email.utils.parsedate_to_datetime(pub_date)
+                            wat_dt = parsed_dt.astimezone(WAT)
+                            date_display = wat_dt.strftime("%b %d, %H:%M WAT")
+                        except Exception:
+                            pass
                     link = item.find("link").text if item.find("link") is not None else "#"
 
                     full_text = f"{title}. {desc}"
@@ -101,7 +135,7 @@ def get_latest_financial_news(limit: int = 12, force_refresh: bool = False, watc
                     raw_items.append({
                         "title": title.strip(),
                         "summary": desc.strip()[:240] + ("..." if len(desc.strip()) > 240 else ""),
-                        "date": pub_date.strip()[:22],
+                        "date": date_display,
                         "link": link.strip(),
                         "currencies": currencies,
                         "primary_currency": primary_curr,
@@ -134,6 +168,11 @@ def get_latest_financial_news(limit: int = 12, force_refresh: bool = False, watc
                         raw_items = json.load(f)
                 except Exception:
                     raw_items = []
+
+    # Guarantee all dates returned are normalized to West Africa Time (WAT)
+    for it in raw_items:
+        if "date" in it:
+            it["date"] = format_to_wat_date(it["date"])
 
     if watchlist_only:
         filtered = [it for it in raw_items if it.get("is_watchlist", True)]

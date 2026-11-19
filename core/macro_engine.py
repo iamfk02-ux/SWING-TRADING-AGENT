@@ -387,7 +387,8 @@ class MacroEngine:
         Generates a clean, comprehensive Macroeconomic & Fundamentals report
         formatted for mobile reading on Telegram.
         """
-        now_str = datetime.now(timezone.utc).strftime("%b %d, %H:%M UTC")
+        WAT = timezone(timedelta(hours=1))
+        now_str = datetime.now(WAT).strftime("%b %d, %H:%M WAT")
 
         # 1. Currency Strength Rankings
         ranked_currs = sorted(

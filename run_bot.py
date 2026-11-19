@@ -403,14 +403,28 @@ def run_cycle(cycle_num: int = 1) -> int:
                     action_desc = f"New entries on {ev_curr} frozen ({buffer_str} {tier_str} blackout window)."
                     if affected_syms:
                         action_desc += f" Protecting open positions ({', '.join(affected_syms)}) against spread widening."
+
+                    # Convert release time to WAT for the user
+                    release_time_wat = ""
+                    if cluster.get("date"):
+                        try:
+                            from datetime import timedelta
+                            WAT = timezone(timedelta(hours=1))
+                            dt_wat = datetime.fromisoformat(cluster["date"]).astimezone(WAT)
+                            release_time_wat = dt_wat.strftime("%H:%M WAT")
+                        except Exception:
+                            pass
+
                     notifier.notify_news_shield_warning(
                         event_title=combined_title,
                         currency=ev_curr,
                         minutes_until=mins_left,
                         affected_positions=affected_syms,
-                        shield_action=action_desc
+                        shield_action=action_desc,
+                        release_time_str=release_time_wat
                     )
-                    append_live_log(f"🚨 [NEWS SHIELD ALERT] {combined_title} ({ev_curr}) in ~{time_left_str}! Active positions affected: {affected_syms or 'None'}")
+                    wat_log_suffix = f" ({release_time_wat})" if release_time_wat else ""
+                    append_live_log(f"🚨 [NEWS SHIELD ALERT] {combined_title} ({ev_curr}) in ~{time_left_str}{wat_log_suffix}! Active positions affected: {affected_syms or 'None'}")
 
                 # Automated Position Defense: If in profit (>= +0.5R), secure Stop Loss to Break-Even
                 if news_cfg.get("auto_breakeven_before_news", True):

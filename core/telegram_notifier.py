@@ -244,16 +244,18 @@ class TelegramNotifier:
         currency: str,
         minutes_until: int,
         affected_positions: list,
-        shield_action: str
+        shield_action: str,
+        release_time_str: str = ""
     ):
         time_str = format_duration_human(minutes_until)
+        release_display = f"In ~{time_str} ({release_time_str})" if release_time_str else f"In ~{time_str}"
         if affected_positions:
             pos_text = ", ".join(affected_positions)
             msg = (
                 f"🛡️ *NEWS SHIELD: {currency} HIGH-IMPACT*\n"
                 f"━━━━━━━━━━━━━━━━━━\n"
                 f"📅 *Event:* {event_title}\n"
-                f"⏳ *Release:* In ~{time_str}\n"
+                f"⏳ *Release:* {release_display}\n"
                 f"🎯 *Guarded Trades:* `{pos_text}` (SL Protected)\n"
                 f"🚫 *Action:* {shield_action or 'Entries Paused for News Blackout'}\n"
                 f"━━━━━━━━━━━━━━━━━━"
@@ -263,7 +265,7 @@ class TelegramNotifier:
                 f"📰 *NEWS HEADS-UP: {currency}*\n"
                 f"━━━━━━━━━━━━━━━━━━\n"
                 f"📅 *Event:* {event_title}\n"
-                f"⏳ *Release:* In ~{time_str}\n"
+                f"⏳ *Release:* {release_display}\n"
                 f"🔒 *Exposure:* Clean (0 open trades)\n"
                 f"🚫 *Action:* {shield_action or 'Entries Paused for News Blackout'}\n"
                 f"━━━━━━━━━━━━━━━━━━"

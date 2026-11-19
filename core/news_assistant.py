@@ -7,10 +7,11 @@ Economic News & AI Assistant Module:
 
 import json
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import List, Dict, Any
 
+WAT = timezone(timedelta(hours=1))
 CACHE_FILE = Path(__file__).resolve().parent.parent / "data" / "economic_calendar_cache.json"
 
 
@@ -76,7 +77,8 @@ def get_upcoming_economic_events(*args, **kwargs) -> List[Dict[str, Any]]:
                 try:
                     dt = datetime.fromisoformat(date_str).astimezone(timezone.utc)
                     sort_ts = dt.timestamp()
-                    formatted_date = dt.strftime("%b %d, %H:%M UTC")
+                    dt_wat = dt.astimezone(WAT)
+                    formatted_date = dt_wat.strftime("%b %d, %H:%M WAT")
                     diff_m = (dt - now).total_seconds() / 60.0
 
                     from core.telegram_notifier import format_duration_human

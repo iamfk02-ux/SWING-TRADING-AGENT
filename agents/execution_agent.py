@@ -311,8 +311,12 @@ class ExecutionAgent:
             err = res.comment if res else str(mt5.last_error())
             return False, 0.0, f"Close rejected: {err}"
 
-    def get_open_positions(self) -> List[Dict[str, Any]]:
-        """Returns all open MT5 positions placed by this agent."""
+    def get_open_positions(self, bot_only: bool = False) -> List[Dict[str, Any]]:
+        """
+        Returns open MT5 positions.
+        If bot_only=True, filters strictly by magic number (10102026).
+        Defaults to False so RiskManager tracks account-wide exposure and prevents duplicate entries on user trades.
+        """
         if not self.is_connected and not self.connect():
             return []
 
@@ -322,8 +326,7 @@ class ExecutionAgent:
 
         pos_list = []
         for p in positions:
-            # Strictly filter for bot trades (magic number 10102026) to ignore all manual trades
-            if getattr(p, "magic", 0) != 10102026:
+            if bot_only and getattr(p, "magic", 0) != 10102026:
                 continue
             pos_list.append({
                 "ticket": p.ticket,
@@ -336,12 +339,16 @@ class ExecutionAgent:
                 "tp": p.tp,
                 "profit": p.profit,
                 "swap": getattr(p, "swap", 0.0),
-                "magic": p.magic
+                "magic": getattr(p, "magic", 0)
             })
         return pos_list
 
-    def get_pending_orders(self) -> List[Dict[str, Any]]:
-        """Returns all pending limit/stop orders placed by this agent."""
+    def get_pending_orders(self, bot_only: bool = False) -> List[Dict[str, Any]]:
+        """
+        Returns pending limit/stop orders.
+        If bot_only=True, filters strictly by magic number (10102026).
+        Defaults to False so RiskManager respects existing manual limit orders.
+        """
         if not self.is_connected and not self.connect():
             return []
 
@@ -351,8 +358,7 @@ class ExecutionAgent:
 
         ord_list = []
         for o in orders:
-            # Strictly filter for bot pending orders (magic number 10102026) to ignore all manual orders
-            if getattr(o, "magic", 0) != 10102026:
+            if bot_only and getattr(o, "magic", 0) != 10102026:
                 continue
             is_buy = o.type in (mt5.ORDER_TYPE_BUY_LIMIT, mt5.ORDER_TYPE_BUY_STOP)
             ord_type = "LIMIT" if o.type in (mt5.ORDER_TYPE_BUY_LIMIT, mt5.ORDER_TYPE_SELL_LIMIT) else "STOP"

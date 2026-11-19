@@ -754,7 +754,11 @@ with tab_news:
                     ORDER BY id DESC
                 """, conn)
                 if not df_biases.empty:
-                    st.dataframe(df_biases[["Currency", "Bias (-1 to +1)", "Expires At", "Reason"]], use_container_width=True, hide_index=True)
+                    try:
+                        df_biases['Expires At (WAT)'] = pd.to_datetime(df_biases['Expires At'], utc=True).dt.tz_convert('Africa/Lagos').dt.strftime('%b %d, %H:%M WAT')
+                        st.dataframe(df_biases[["Currency", "Bias (-1 to +1)", "Expires At (WAT)", "Reason"]], use_container_width=True, hide_index=True)
+                    except Exception:
+                        st.dataframe(df_biases[["Currency", "Bias (-1 to +1)", "Expires At", "Reason"]], use_container_width=True, hide_index=True)
                     if st.button("🗑️ Clear All Active Biases", use_container_width=True):
                         clear_all_news_biases(DB_PATH)
                         st.success("All active biases cleared!")
@@ -894,19 +898,20 @@ with tab_news:
 
             # 3. Apply Time Filter
             if time_filter == "Today & Upcoming Only":
-                today_start_ts = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0).timestamp()
+                wat_now = datetime.now(timezone(timedelta(hours=1)))
+                today_start_ts = wat_now.replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
                 df_ev = df_ev[df_ev["sort_ts"] >= today_start_ts]
 
             rename_map = {
                 "country": "Currency",
                 "title": "Release / Event",
                 "impact": "Tier / Impact",
-                "date": "Scheduled (UTC)",
+                "date": "Scheduled (WAT)",
                 "status": "Shield Status",
                 "forecast": "Forecast",
                 "previous": "Previous"
             }
-            display_cols = ["Currency", "Release / Event", "Tier / Impact", "Scheduled (UTC)", "Shield Status", "Forecast", "Previous"]
+            display_cols = ["Currency", "Release / Event", "Tier / Impact", "Scheduled (WAT)", "Shield Status", "Forecast", "Previous"]
             df_display_cal = df_ev.rename(columns=rename_map)
 
             if not df_display_cal.empty:
