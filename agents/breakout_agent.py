@@ -73,18 +73,22 @@ class BreakoutAgent:
                     if candle_range >= 1.2 * atr_val:
                         confidence += 0.1
 
+                    retest_entry = round(float(d_high + (0.05 * atr_val)), 5)
+                    sl_rounded = round(float(sl), 5)
+                    tp_target = round(float(retest_entry + 2.5 * abs(retest_entry - sl_rounded)), 5)
+
                     return {
                         "symbol": symbol,
                         "strategy": "BREAKOUT",
                         "direction": "BUY",
-                        "order_type": "STOP",
-                        "entry": float(d_high + (self.breakout_buffer_atr * atr_val)),
+                        "order_type": "LIMIT",
+                        "entry": retest_entry,
                         "market_price": float(curr_bar["close"]),
-                        "stop_loss": float(sl),
-                        "take_profit": None,
+                        "stop_loss": sl_rounded,
+                        "take_profit": tp_target,
                         "confidence": min(1.0, confidence),
                         "regime": current_regime,
-                        "reason": f"D1 Bullish Donchian breakout above {d_high:.5f} with strong candle body",
+                        "reason": f"D1 Bullish Break-and-Retest Buy Limit @ {retest_entry:.5f} (waiting for pullback to broken resistance {d_high:.5f})",
                         "timestamp": str(curr_bar["timestamp"])
                     }
 
@@ -103,18 +107,22 @@ class BreakoutAgent:
                     if candle_range >= 1.2 * atr_val:
                         confidence += 0.1
 
+                    retest_entry = round(float(d_low - (0.05 * atr_val)), 5)
+                    sl_rounded = round(float(sl), 5)
+                    tp_target = round(float(retest_entry - 2.5 * abs(sl_rounded - retest_entry)), 5)
+
                     return {
                         "symbol": symbol,
                         "strategy": "BREAKOUT",
                         "direction": "SELL",
-                        "order_type": "STOP",
-                        "entry": float(d_low - (self.breakout_buffer_atr * atr_val)),
+                        "order_type": "LIMIT",
+                        "entry": retest_entry,
                         "market_price": float(curr_bar["close"]),
-                        "stop_loss": float(sl),
-                        "take_profit": None,
+                        "stop_loss": sl_rounded,
+                        "take_profit": tp_target,
                         "confidence": min(1.0, confidence),
                         "regime": current_regime,
-                        "reason": f"D1 Bearish Donchian breakout below {d_low:.5f} with strong candle body",
+                        "reason": f"D1 Bearish Break-and-Retest Sell Limit @ {retest_entry:.5f} (waiting for pullback to broken support {d_low:.5f})",
                         "timestamp": str(curr_bar["timestamp"])
                     }
 
