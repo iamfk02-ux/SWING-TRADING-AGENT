@@ -75,7 +75,7 @@ class BreakoutAgent:
 
                     retest_entry = round(float(d_high + (0.05 * atr_val)), 5)
                     sl_rounded = round(float(sl), 5)
-                    tp_target = round(float(retest_entry + 2.5 * abs(retest_entry - sl_rounded)), 5)
+                    tp_target = round(float(retest_entry + 1.5 * abs(retest_entry - sl_rounded)), 5)
 
                     return {
                         "symbol": symbol,
@@ -109,7 +109,7 @@ class BreakoutAgent:
 
                     retest_entry = round(float(d_low - (0.05 * atr_val)), 5)
                     sl_rounded = round(float(sl), 5)
-                    tp_target = round(float(retest_entry - 2.5 * abs(sl_rounded - retest_entry)), 5)
+                    tp_target = round(float(retest_entry - 1.5 * abs(sl_rounded - retest_entry)), 5)
 
                     return {
                         "symbol": symbol,

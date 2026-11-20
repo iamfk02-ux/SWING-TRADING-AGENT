@@ -156,15 +156,15 @@ risk:
 # ---------------------------------------------------------------------
 trade_management:
   enabled: true
-  breakeven_trigger_r: 0.8         # Move SL to Break-Even at +0.8R (prevents +0.8R green trades from turning red)
+  breakeven_trigger_r: 0.8         # Move SL to Break-Even at +0.8R (protects green trades)
   breakeven_buffer_r: 0.05         # Cushion above entry (0.05R) to cover commission/spread
-  partial_tp_trigger_r: 1.5        # Bank partial profit at +1.5R (let initial leg expand into profit)
-  partial_tp_volume_pct: 0.50      # Bank 50% of position into cash (e.g. 0.01 lot of 0.02 lots)
-  step_lock_trigger_r: 2.0         # Step-lock guaranteed profit at +2.0R
-  step_lock_guarantee_r: 0.8       # Guaranteed locked profit (+0.8R)
-  dynamic_trail_trigger_r: 2.2     # Trail SL once trade reaches +2.2R
-  trail_atr_multiplier: 1.5        # Distance behind price: 1.5 * lower_atr (ample breathing room)
-  trail_to_candle_structure: true  # Trail behind previous candle High/Low
+  partial_tp_trigger_r: 1.5        # Full 100% Cash Take-Profit at +1.5R (zero runner giveback!)
+  partial_tp_volume_pct: 1.00      # 1.00 = Bank 100% of position into cash at +1.5R
+  step_lock_trigger_r: 99.0        # Disabled in 100% @ +1.5R cash-bank mode
+  step_lock_guarantee_r: 0.8
+  dynamic_trail_trigger_r: 99.0    # Disabled in 100% @ +1.5R cash-bank mode
+  trail_atr_multiplier: 1.5
+  trail_to_candle_structure: true
 
 # ---------------------------------------------------------------------
 # SIGNAL SCORER & QUALITY FILTER
@@ -213,7 +213,7 @@ strategies:
     min_stop_atr: 1.0              # Minimum 1.0 ATR stop distance
     min_stop_pips: 20.0            # Mandatory 20-pip minimum stop floor to prevent whipsaws
     max_stop_atr: 2.8
-    target_r: 2.5                  # 2.5R target to capture multi-day swing expansions
+    target_r: 1.5                  # Bank 100% cash at +1.5R (clean all-or-nothing exit, zero runner giveback)
     breakeven_at_r: 0.8            # Move to BE at +0.8R to protect green trades from turning red
     breakeven_buffer_r: 0.05
     trail_atr_d1: 2.5
@@ -239,11 +239,11 @@ strategies:
     min_minutes_after: 15          # Dust must settle: zero entries within 0-15m whipsaw/spread spike
     max_minutes_after: 120         # Momentum repricing window: active within 2 hours of release
     min_impulse_atr_multiplier: 0.75 # News M15 candle must show real institutional impulse (>= 0.75x ATR)
-    target_r: 2.0                  # Enforce minimum 2.0R reward-to-risk on momentum impulse
+    target_r: 1.5                  # Bank 100% cash at +1.5R
     stop_buffer_atr: 0.5           # Buffer behind news reaction base
     min_stop_pips: 20.0            # Anti-whipsaw 20-pip safety floor (never use fragile 8-10 pip stops)
   m15_sniper:
-    enabled: true                  # Top-Down D1 -> H4 Value Zone -> M15 Market Structure Shift (+17.73R, PF 1.89)
+    enabled: true                  # Top-Down D1 -> H4 Value Zone -> M15 Market Structure Shift (+17.31R @ 100% 1.5R)
     h4_ema_fast: 20
     h4_ema_slow: 50
     atr_period: 14
@@ -254,7 +254,7 @@ strategies:
     stop_buffer_m15_atr: 0.5       # Structural buffer behind M15 displacement extreme
     min_stop_pips: 20.0            # Proven 20-pip anti-whipsaw stop floor (outperformed 15p in backtest)
     max_stop_pips: 45.0            # Cap stop size to keep risk/reward tight
-    target_r: 2.5                  # Multi-day swing expansion target (+2.5R)
+    target_r: 1.5                  # Bank 100% cash at +1.5R (zero runner stress)
     kill_zones_only: true          # Institutional Kill Zones ONLY: London (08:00-11:30 WAT) & NY Overlap (13:30-17:30 WAT) -> PF 2.06, -45% MaxDD
     excluded_symbols:              # Desk Audit: exclude negative-expectancy M15 stop-hunt pairs (still traded on H4)
       - CADJPY

@@ -213,8 +213,17 @@ class TradeManager:
                     notifier.notify_breakeven(sym, be_target)
 
         # -------------------------------------------------------------
-        # STEP 2: 33% TRUE PARTIAL TAKE-PROFIT (+1.2R) + HARD +2.5R RUNNER TP
+        # STEP 2: 100% CASH EXIT MODE vs PARTIAL TAKE-PROFIT + RUNNER
         # -------------------------------------------------------------
+        if self.partial_tp_vol_pct >= 0.99:
+            # Clean all-or-nothing 100% Bank @ +1.5R mode: ensure broker hard TP is set at +1.5R and return!
+            full_tp = round(entry + (self.partial_tp_trigger_r * risk_dist), sym_digits) if direction == "BUY" else round(entry - (self.partial_tp_trigger_r * risk_dist), sym_digits)
+            if tp is None or tp == 0.0:
+                if exec_agent.modify_sltp(ticket, new_sl=sl, new_tp=full_tp):
+                    tp = full_tp
+                    logger_func(f"🎯 [100% BANK TP ARMED] {sym} #{ticket}: Set Hard +{self.partial_tp_trigger_r}R Full-Exit Broker TP at {full_tp:.5f}.")
+            return
+
         runner_tp = round(entry + (2.5 * risk_dist), sym_digits) if direction == "BUY" else round(entry - (2.5 * risk_dist), sym_digits)
 
         # Ensure any post-partial runner that had TP=0 gets its Hard +2.5R Broker TP restored
