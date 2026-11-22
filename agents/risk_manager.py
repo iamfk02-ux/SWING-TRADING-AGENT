@@ -324,8 +324,13 @@ class RiskManager:
                 pass
 
         # 0. Weekend Market Status Check
-        # Forex and Metals close on weekends (Friday 5pm EST to Sunday 5pm EST).
-        if now_utc.weekday() in (5, 6):
+        # Forex and Metals close on weekends (Friday 22:00 UTC to Sunday 22:00 UTC / 5pm EST).
+        is_wknd = (
+            (now_utc.weekday() == 4 and now_utc.hour >= 22)
+            or now_utc.weekday() == 5
+            or (now_utc.weekday() == 6 and now_utc.hour < 22)
+        )
+        if is_wknd:
             return False, f"WEEKEND: {symbol} market is closed. Traditional markets resume Sunday 5:00 PM EST.", 0.0
 
         # 0.005 Friday Afternoon Weekend-Gap Protection Cutoff

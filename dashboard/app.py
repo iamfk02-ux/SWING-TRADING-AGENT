@@ -340,8 +340,13 @@ with st.sidebar:
 # -------------------------------------------------------------
 st.title("Trading Bot — Command Center")
 
-# Live market banner
-is_wknd = datetime.now(timezone.utc).weekday() in (5, 6)
+# Live market banner (Forex closes Fri 22:00 UTC -> reopens Sun 22:00 UTC / 23:00 WAT)
+_now_utc_ui = datetime.now(timezone.utc)
+is_wknd = (
+    (_now_utc_ui.weekday() == 4 and _now_utc_ui.hour >= 22)
+    or _now_utc_ui.weekday() == 5
+    or (_now_utc_ui.weekday() == 6 and _now_utc_ui.hour < 22)
+)
 num_pairs = len(config.get("symbols", {}).get("forex", [])) + len(config.get("symbols", {}).get("metals", []))
 if is_wknd:
     st.info("🕒 **Weekend Mode Active:** Traditional Forex and Metals markets are closed. Scanner is standing by until markets reopen Sunday 5:00 PM EST.")

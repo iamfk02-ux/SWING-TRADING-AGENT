@@ -131,8 +131,13 @@ def run_cycle(cycle_num: int = 1) -> int:
     circuit_breaker = CircuitBreaker(config)
     macro_engine = MacroEngine(config)
 
-    # Weekend vs Weekday portfolio selection
-    is_weekend = datetime.now(timezone.utc).weekday() in (5, 6)
+    # Weekend vs Weekday portfolio selection (Forex closes Fri 22:00 UTC -> reopens Sun 22:00 UTC / 23:00 WAT)
+    _now_utc = datetime.now(timezone.utc)
+    is_weekend = (
+        (_now_utc.weekday() == 4 and _now_utc.hour >= 22)
+        or _now_utc.weekday() == 5
+        or (_now_utc.weekday() == 6 and _now_utc.hour < 22)
+    )
     forex_syms = config.get("symbols", {}).get("forex", [])
     metal_syms = config.get("symbols", {}).get("metals", [])
 
