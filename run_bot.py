@@ -131,6 +131,13 @@ def run_cycle(cycle_num: int = 1) -> int:
     circuit_breaker = CircuitBreaker(config)
     macro_engine = MacroEngine(config)
 
+    # Refresh live breaking macro wire (15-min disk cache) to auto-score Actual-vs-Forecast surprises
+    try:
+        from core.news_feed import get_latest_financial_news
+        get_latest_financial_news(limit=15, force_refresh=False, watchlist_only=True)
+    except Exception:
+        pass
+
     # Weekend vs Weekday portfolio selection (Forex closes Fri 22:00 UTC -> reopens Sun 22:00 UTC / 23:00 WAT)
     _now_utc = datetime.now(timezone.utc)
     is_weekend = (

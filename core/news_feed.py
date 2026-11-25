@@ -145,15 +145,22 @@ def get_latest_financial_news(limit: int = 12, force_refresh: bool = False, watc
                         "advice": ai_eval["advice"]
                     })
 
-                    # If headline carries strong decisive directional sentiment, register into MacroEngine
-                    if ai_eval["bias"] != 0 and primary_curr in WATCHLIST_CURRENCIES:
+                    # Register Actual-vs-Forecast Tier-1 economic surprises AND directional sentiment into MacroEngine
+                    if primary_curr in WATCHLIST_CURRENCIES:
                         try:
                             from core.macro_engine import MacroEngine
-                            MacroEngine().update_news_sentiment(
+                            me = MacroEngine()
+                            me.evaluate_headline_surprise(
                                 currency=primary_curr,
                                 headline=title.strip(),
-                                score_delta=float(ai_eval["bias"]) * 0.25
+                                summary=desc.strip()
                             )
+                            if ai_eval["bias"] != 0:
+                                me.update_news_sentiment(
+                                    currency=primary_curr,
+                                    headline=title.strip(),
+                                    score_delta=float(ai_eval["bias"]) * 0.25
+                                )
                         except Exception:
                             pass
 

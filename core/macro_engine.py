@@ -22,6 +22,33 @@ from typing import Dict, Any, List, Optional, Tuple
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 MACRO_STATE_FILE = DATA_DIR / "macro_state.json"
 MACRO_NEWS_FILE = DATA_DIR / "macro_news_state.json"
+MACRO_SURPRISE_FILE = DATA_DIR / "macro_surprise_ledger.json"
+
+# Tier-1 Economic Indicators & Directional Polarity for Actual vs. Forecast Surprises
+# Direct (+1): Higher than forecast is HAWKISH / BULLISH for the currency
+# Inverse (-1): Higher than forecast is DOVISH / BEARISH for the currency
+ECONOMIC_INDICATOR_POLARITY = {
+    "core pce": 1,
+    "pce price": 1,
+    "core cpi": 1,
+    "trimmed mean cpi": 1,
+    "cpi": 1,
+    "inflation": 1,
+    "non-farm": 1,
+    "nonfarm": 1,
+    "nfp": 1,
+    "payrolls": 1,
+    "employment change": 1,
+    "gdp": 1,
+    "retail sales": 1,
+    "pmi": 1,
+    "ism": 1,
+    "average hourly earnings": 1,
+    "wage growth": 1,
+    "unemployment rate": -1,
+    "jobless claims": -1,
+    "unemployment claims": -1,
+}
 
 
 # ---------------------------------------------------------------------
@@ -191,8 +218,138 @@ class MacroEngine:
             except Exception:
                 pass
 
-        total_score = round(max(-5.0, min(5.0, base_score + news_adj)), 2)
+        # Dynamic Actual-vs-Forecast Economic Surprise overlay (72h time-decayed ledger)
+        surprise_adj = self.get_active_surprise_score(curr)
+
+        total_score = round(max(-5.0, min(5.0, base_score + news_adj + surprise_adj)), 2)
         return total_score
+
+    def _parse_numeric_value(self, raw: str) -> Optional[float]:
+        """Parses economic strings like '0.4%', '250K', '-0.2%', '3.5%' into floats."""
+        if not raw:
+            return None
+        s = str(raw).strip().replace(",", "").replace("%", "")
+        mult = 1.0
+        if s.upper().endswith("K"):
+            mult = 1e3
+            s = s[:-1]
+        elif s.upper().endswith("M"):
+            mult = 1e6
+            s = s[:-1]
+        elif s.upper().endswith("B"):
+            mult = 1e9
+            s = s[:-1]
+        try:
+            return float(s) * mult
+        except Exception:
+            return None
+
+    def get_active_surprise_score(self, currency: str) -> float:
+        """Returns net time-decayed Actual-vs-Forecast surprise score for a currency (72h window)."""
+        curr = currency.upper().strip()
+        if not MACRO_SURPRISE_FILE.exists():
+            return 0.0
+        try:
+            with open(MACRO_SURPRISE_FILE, "r", encoding="utf-8") as f:
+                ledger = json.load(f)
+            now_ts = datetime.now(timezone.utc).timestamp()
+            total = 0.0
+            for entry in ledger.values():
+                if entry.get("currency") != curr:
+                    continue
+                age_h = (now_ts - float(entry.get("timestamp", 0))) / 3600.0
+                if age_h < 0 or age_h > 72.0:
+                    continue
+                weight = 1.0 if age_h <= 24.0 else 0.5
+                total += float(entry.get("score_delta", 0.0)) * weight
+            return round(max(-2.0, min(2.0, total)), 2)
+        except Exception:
+            return 0.0
+
+    def evaluate_headline_surprise(self, currency: str, headline: str, summary: str = "") -> Optional[Dict[str, Any]]:
+        """
+        Extracts numeric Actual vs. Forecast surprises from Tier-1 economic releases
+        (e.g. 'US Core PCE rises 0.4% vs. 0.3% expected' or 'US Jobless Claims 240K vs 220K forecast')
+        and records a deduplicated, time-decayed surprise delta in MACRO_SURPRISE_FILE.
+        """
+        curr = currency.upper().strip()
+        full_text = f"{headline} {summary}"
+        lower = full_text.lower()
+
+        # 1. Identify Tier-1 indicator & polarity
+        matched_ind = None
+        polarity = 0
+        for ind, pol in ECONOMIC_INDICATOR_POLARITY.items():
+            if ind in lower:
+                matched_ind = ind
+                polarity = pol
+                break
+        if not matched_ind:
+            return None
+
+        # 2. Extract "<actual> vs[.]? <forecast>" pattern
+        m = re.search(
+            r"(-?\d+(?:\.\d+)?\s*[%kmbKMB]?)\s+(?:vs\.?|versus|compared to|against)\s+(-?\d+(?:\.\d+)?\s*[%kmbKMB]?)\s*(?:expected|forecast|est\.?|consensus|prior)?",
+            full_text,
+            flags=re.IGNORECASE
+        )
+        if not m:
+            return None
+
+        actual_val = self._parse_numeric_value(m.group(1))
+        forecast_val = self._parse_numeric_value(m.group(2))
+        if actual_val is None or forecast_val is None:
+            return None
+
+        diff = actual_val - forecast_val
+        if abs(diff) < 1e-9:
+            return None  # In-line print (zero surprise)
+
+        # Direction of surprise: +1 = Hawkish/Bullish, -1 = Dovish/Bearish
+        surprise_dir = (1 if diff > 0 else -1) * polarity
+        # Magnitude scaling: Tier-1 inflation/jobs/GDP beat/miss shifts currency score by +/- 0.90
+        score_delta = round(0.90 * surprise_dir, 2)
+
+        today_key = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        event_key = f"{today_key}_{curr}_{matched_ind.replace(' ', '_')}"
+
+        ledger = {}
+        if MACRO_SURPRISE_FILE.exists():
+            try:
+                with open(MACRO_SURPRISE_FILE, "r", encoding="utf-8") as f:
+                    ledger = json.load(f)
+            except Exception:
+                ledger = {}
+
+        # Deduplicate strictly once per indicator per day
+        if event_key in ledger:
+            return ledger[event_key]
+
+        # Prune entries older than 72 hours
+        now_ts = datetime.now(timezone.utc).timestamp()
+        ledger = {k: v for k, v in ledger.items() if (now_ts - float(v.get("timestamp", 0))) <= 72 * 3600}
+
+        verdict = "HAWKISH_BEAT" if surprise_dir > 0 else "DOVISH_MISS"
+        record = {
+            "currency": curr,
+            "indicator": matched_ind.upper(),
+            "actual": m.group(1).strip(),
+            "forecast": m.group(2).strip(),
+            "verdict": verdict,
+            "score_delta": score_delta,
+            "headline": headline[:140],
+            "timestamp": now_ts,
+            "recorded_at_wat": datetime.now(timezone(timedelta(hours=1))).strftime("%b %d, %H:%M WAT")
+        }
+        ledger[event_key] = record
+
+        try:
+            DATA_DIR.mkdir(parents=True, exist_ok=True)
+            with open(MACRO_SURPRISE_FILE, "w", encoding="utf-8") as f:
+                json.dump(ledger, f, indent=2)
+        except Exception:
+            pass
+        return record
 
     def extract_currencies(self, symbol: str) -> Tuple[str, str]:
         """Extracts base and quote currency from any broker symbol string."""
